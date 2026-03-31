@@ -44,6 +44,9 @@ dependencies:
   url_launcher: ^6.2.0
   permission_handler: ^12.0.1
   deepar_flutter: 0.0.5
+  http: ^1.2.0 
+  image_picker: ^1.2.1
+  google_mlkit_face_detection: ^0.13.2
  
   # baaki dependencies...
 
@@ -75,6 +78,8 @@ flutter:
   uses-material-design: true
   assets:
     - assets/effects/makeup.deepar
+    - assets/textures/
+    - assets/images/
 
   # To add assets to your application, add an assets section, like this:
   # assets:
