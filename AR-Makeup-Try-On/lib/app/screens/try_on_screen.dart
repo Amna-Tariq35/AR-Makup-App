@@ -6,10 +6,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:deepar_flutter/deepar_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
-import '../../app/utils/app_colors.dart';
-import '../../app/screens/saved_looks_screen.dart';
-import '../../app/screens/auth_screen.dart';
-import '../../app/screens/profile_screen.dart';
+import '../utils/app_colors.dart';
+import 'saved_looks_screen.dart';
+import 'auth_screen.dart';
+import 'profile_screen.dart';
 
 // ── MODELS ───────────────────────────────────────────────────────────────────
 
@@ -88,6 +88,66 @@ enum TryOnCategory {
   eyeshadow,
 }
 
+// ── INTENSITY MAPPING ─────────────────────────────────────────────────────────
+//
+// UI shows 0–100 (integer %) to the user.
+// _intensities stores 0.0–1.0 (that's the "user slider" value).
+//
+// _mapIntensityToBackend() converts the user's 0–1 value to the REAL
+// backend value that makes each category look natural & realistic.
+//
+// Key insight per category:
+//   • Lipstick  – real lipstick at "full" coverage is ~65–75% alpha on a
+//     semi-matte shader.  Going to 100% looks painted / plastic.
+//     Mapped range: 0.30 → 0.68
+//
+//   • Lip Gloss – gloss looks best at lower alpha (translucency IS the
+//     effect).  Cranking alpha to 1.0 kills the specular shimmer.
+//     Mapped range: 0.38 → 0.60   (specular does the heavy lifting)
+//
+//   • Foundation – skin coverage: light veil to medium, never opaque mask.
+//     Mapped range: 0.12 → 0.42
+//
+//   • Blush     – very easy to over-apply; real blush is subtle.
+//     Mapped range: 0.08 → 0.32
+//
+//   • Eyeshadow – artistic range, but max ~0.80 keeps it wearable.
+//     Mapped range: 0.15 → 0.75
+//
+//   • Eyeliner  – should be opaque even at low slider; minimum 0.55.
+//     Mapped range: 0.55 → 0.95
+//
+//   • Highlighter – subtle shimmer; too high = ghost-white patch.
+//     Mapped range: 0.10 → 0.42
+//
+//   • Eyelashes / Mascara – controlled by lash config opacity * this factor.
+//     Mapped range: 0.70 → 1.00
+//
+double _mapIntensityToBackend(TryOnCategory category, double userValue) {
+  // userValue is 0.0 → 1.0  (slider min=0.0, max=1.0, shown as 0–100%)
+  double lo, hi;
+  switch (category) {
+    case TryOnCategory.lipstick:
+      lo = 0.30; hi = 0.68;
+    case TryOnCategory.lipGloss:
+      lo = 0.38; hi = 0.60;
+    case TryOnCategory.foundation:
+      lo = 0.12; hi = 0.42;
+    case TryOnCategory.blush:
+      lo = 0.08; hi = 0.32;
+    case TryOnCategory.eyeshadow:
+      lo = 0.15; hi = 0.75;
+    case TryOnCategory.eyeliner:
+      lo = 0.55; hi = 0.95;
+    case TryOnCategory.highlighter:
+      lo = 0.10; hi = 0.42;
+    case TryOnCategory.eyelashes:
+    case TryOnCategory.mascara:
+      lo = 0.70; hi = 1.00;
+  }
+  return lo + userValue * (hi - lo);
+}
+
 // ── SCREEN ───────────────────────────────────────────────────────────────────
 
 class TryOnScreen extends StatefulWidget {
@@ -115,16 +175,26 @@ class _TryOnScreenState extends State<TryOnScreen>
     for (var cat in TryOnCategory.values) cat: null,
   };
 
+  // User-facing slider values: 0.0 → 1.0  (displayed as 0–100%)
+  // Defaults are chosen so the DEFAULT look is already realistic:
+  //   lipstick 65% → backend 0.509  (natural semi-matte)
+  //   lip gloss 60% → backend 0.492  (translucent gloss)
+  //   foundation 40% → backend 0.240  (light coverage)
+  //   blush 50% → backend 0.200  (natural flush)
+  //   eyeshadow 55% → backend 0.462  (wearable)
+  //   eyeliner 80% → backend 0.870  (crisp line)
+  //   highlighter 45% → backend 0.244  (subtle glow)
+  //   lashes/mascara 85% → backend 0.955  (full lash)
   final Map<TryOnCategory, double> _intensities = {
-    TryOnCategory.eyelashes: 1.0,
-    TryOnCategory.lipstick: 0.7,
-    TryOnCategory.lipGloss: 0.6,
-    TryOnCategory.foundation: 0.5,
-    TryOnCategory.blush: 0.4,
-    TryOnCategory.mascara: 1.0,
-    TryOnCategory.highlighter: 0.6,
-    TryOnCategory.eyeliner: 0.9,
-    TryOnCategory.eyeshadow: 0.6,
+    TryOnCategory.eyelashes:   0.85,
+    TryOnCategory.lipstick:    0.65,
+    TryOnCategory.lipGloss:    0.60,
+    TryOnCategory.foundation:  0.40,
+    TryOnCategory.blush:       0.50,
+    TryOnCategory.mascara:     0.85,
+    TryOnCategory.highlighter: 0.45,
+    TryOnCategory.eyeliner:    0.80,
+    TryOnCategory.eyeshadow:   0.55,
   };
 
   late AnimationController _panelController;
@@ -187,7 +257,7 @@ class _TryOnScreenState extends State<TryOnScreen>
     switch (category) {
       case TryOnCategory.lipstick:
       case TryOnCategory.lipGloss:
-        return 'Lips';
+        return 'lips';
       case TryOnCategory.blush:
         return 'Blush';
       case TryOnCategory.eyeshadow:
@@ -198,7 +268,7 @@ class _TryOnScreenState extends State<TryOnScreen>
       case TryOnCategory.mascara:
         return 'EyeLashes';
       case TryOnCategory.foundation:
-        return 'Foundation';
+        return 'face_makeup';
       case TryOnCategory.highlighter:
         return 'Highlighter';
     }
@@ -206,70 +276,43 @@ class _TryOnScreenState extends State<TryOnScreen>
 
   String get _currentPrefix {
     switch (_currentCategory) {
-      case TryOnCategory.eyelashes:
-        return 'lsh_';
-      case TryOnCategory.lipstick:
-        return 'lip_';
-      case TryOnCategory.lipGloss:
-        return 'gloss_';
-      case TryOnCategory.foundation:
-        return 'fnd_';
-      case TryOnCategory.blush:
-        return 'blu_';
-      case TryOnCategory.mascara:
-        return 'mas_';
-      case TryOnCategory.highlighter:
-        return 'hgl_';
-      case TryOnCategory.eyeliner:
-        return 'eln_';
-      case TryOnCategory.eyeshadow:
-        return 'esh_';
+      case TryOnCategory.eyelashes:   return 'lsh_';
+      case TryOnCategory.lipstick:    return 'lip_';
+      case TryOnCategory.lipGloss:    return 'gloss_';
+      case TryOnCategory.foundation:  return 'fnd_';
+      case TryOnCategory.blush:       return 'blu_';
+      case TryOnCategory.mascara:     return 'mas_';
+      case TryOnCategory.highlighter: return 'hgl_';
+      case TryOnCategory.eyeliner:    return 'eln_';
+      case TryOnCategory.eyeshadow:   return 'esh_';
     }
   }
 
   String _getCategoryName(TryOnCategory cat) {
     switch (cat) {
-      case TryOnCategory.eyelashes:
-        return 'Lashes';
-      case TryOnCategory.lipstick:
-        return 'Lipstick';
-      case TryOnCategory.lipGloss:
-        return 'Lip Gloss';
-      case TryOnCategory.foundation:
-        return 'Foundation';
-      case TryOnCategory.blush:
-        return 'Blush';
-      case TryOnCategory.mascara:
-        return 'Mascara';
-      case TryOnCategory.highlighter:
-        return 'Highlighter';
-      case TryOnCategory.eyeliner:
-        return 'Eyeliner';
-      case TryOnCategory.eyeshadow:
-        return 'Eyeshadow';
+      case TryOnCategory.eyelashes:   return 'Lashes';
+      case TryOnCategory.lipstick:    return 'Lipstick';
+      case TryOnCategory.lipGloss:    return 'Lip Gloss';
+      case TryOnCategory.foundation:  return 'Foundation';
+      case TryOnCategory.blush:       return 'Blush';
+      case TryOnCategory.mascara:     return 'Mascara';
+      case TryOnCategory.highlighter: return 'Highlighter';
+      case TryOnCategory.eyeliner:    return 'Eyeliner';
+      case TryOnCategory.eyeshadow:   return 'Eyeshadow';
     }
   }
 
   IconData _getCategoryIcon(TryOnCategory cat) {
     switch (cat) {
-      case TryOnCategory.eyelashes:
-        return Icons.remove;
-      case TryOnCategory.lipstick:
-        return Icons.water_drop_outlined;
-      case TryOnCategory.lipGloss:
-        return Icons.auto_awesome_outlined;
-      case TryOnCategory.foundation:
-        return Icons.circle_outlined;
-      case TryOnCategory.blush:
-        return Icons.blur_circular_outlined;
-      case TryOnCategory.mascara:
-        return Icons.minimize_rounded;
-      case TryOnCategory.highlighter:
-        return Icons.flare_outlined;
-      case TryOnCategory.eyeliner:
-        return Icons.edit_outlined;
-      case TryOnCategory.eyeshadow:
-        return Icons.palette_outlined;
+      case TryOnCategory.eyelashes:   return Icons.remove;
+      case TryOnCategory.lipstick:    return Icons.water_drop_outlined;
+      case TryOnCategory.lipGloss:    return Icons.auto_awesome_outlined;
+      case TryOnCategory.foundation:  return Icons.circle_outlined;
+      case TryOnCategory.blush:       return Icons.blur_circular_outlined;
+      case TryOnCategory.mascara:     return Icons.minimize_rounded;
+      case TryOnCategory.highlighter: return Icons.flare_outlined;
+      case TryOnCategory.eyeliner:    return Icons.edit_outlined;
+      case TryOnCategory.eyeshadow:   return Icons.palette_outlined;
     }
   }
 
@@ -365,10 +408,10 @@ class _TryOnScreenState extends State<TryOnScreen>
                   ),
                 );
               },
-              child: Text(
+              child: const Text(
                 'Sign In',
                 style: TextStyle(
-                  color: AppColors.secondary,
+                  color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
@@ -376,7 +419,7 @@ class _TryOnScreenState extends State<TryOnScreen>
             ),
           ],
         ),
-        backgroundColor: AppColors.textMain.withOpacity(0.92),
+        backgroundColor: AppColors.primary,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -387,7 +430,14 @@ class _TryOnScreenState extends State<TryOnScreen>
   }
 
   // ── APPLY COLOR ───────────────────────────────────────────────────────────
-
+  //
+  // ARCHITECTURE NOTE:
+  // _intensities[category] is the USER'S 0.0–1.0 value (shown as 0–100% in UI).
+  // Before sending to DeepAR we ALWAYS call _mapIntensityToBackend() which
+  // remaps to the realistic physical range for that product category.
+  // This means the slider travels the full 0–100% arc visually but the
+  // actual shader values stay in the "looks real" window.
+  //
   Future<void> _applyColorToDeepAR(
     DbShade? shade,
     TryOnCategory category,
@@ -395,24 +445,69 @@ class _TryOnScreenState extends State<TryOnScreen>
     if (!_isInitialized) return;
     final gameObject = _getGameObject(category);
 
+    // ── CLEAR / NULL ──────────────────────────────────────────────────────
     if (shade == null) {
-      _deepArController.changeParameter(
-        gameObject: gameObject,
-        component: 'MeshRenderer',
-        parameter: 'u_color',
-        newParameter: vector.Vector4(0, 0, 0, 0),
-      );
+      if (category == TryOnCategory.foundation) {
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'foundationColor',
+          newParameter: vector.Vector4(0.9, 0.88, 0.80, 0.0),
+        );
+      } else if (category == TryOnCategory.lipstick ||
+          category == TryOnCategory.lipGloss) {
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_diffuseColor',
+          newParameter: vector.Vector4(0, 0, 0, 0),
+        );
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_ambientColor',
+          newParameter: vector.Vector4(0, 0, 0, 0),
+        );
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_specularColor',
+          newParameter: vector.Vector4(0, 0, 0, 0),
+        );
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_shininess',
+          newParameter: 0.0,
+        );
+      } else {
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_color',
+          newParameter: vector.Vector4(0, 0, 0, 0),
+        );
+      }
       return;
     }
 
+    final color = shade.color;
+    final r = color.red / 255.0;
+    final g = color.green / 255.0;
+    final b = color.blue / 255.0;
+
+    // Mapped (realistic) intensity for this category
+    final userIntensity = _intensities[category] ?? 0.5;
+    final backendIntensity = _mapIntensityToBackend(category, userIntensity);
+
+    // ── EYELASHES / MASCARA ───────────────────────────────────────────────
     if (category == TryOnCategory.eyelashes ||
         category == TryOnCategory.mascara) {
       final config = _lashConfigs[shade.productKey];
       if (config != null) {
         try {
-          final textureName = config.baseMaskType == 'gorgeous'
-              ? 'gorgeous.png'
-              : 'sexy.png';
+          final textureName =
+              config.baseMaskType == 'gorgeous' ? 'gorgeous.png' : 'sexy.png';
           final texturePath = await _getAssetPath(textureName);
           _deepArController.changeParameter(
             gameObject: gameObject,
@@ -427,7 +522,8 @@ class _TryOnScreenState extends State<TryOnScreen>
             newParameter: vector.Vector3(config.scaleX, config.scaleY, 1.0),
           );
           final lashColor = config.color;
-          final finalAlpha = config.opacity * (_intensities[category] ?? 1.0);
+          // backendIntensity already in 0.70–1.00 range for lashes
+          final finalAlpha = (config.opacity * backendIntensity).clamp(0.0, 1.0);
           _deepArController.changeParameter(
             gameObject: gameObject,
             component: 'MeshRenderer',
@@ -446,53 +542,128 @@ class _TryOnScreenState extends State<TryOnScreen>
       return;
     }
 
-    final color = shade.color;
-    final r = color.red / 255.0;
-    final g = color.green / 255.0;
-    final b = color.blue / 255.0;
-    double a = _intensities[category] ?? 0.5;
-    if (category == TryOnCategory.eyeshadow)
-      a *= 0.9;
-    else if (category != TryOnCategory.eyeliner)
-      a *= 0.7;
+    // ── FOUNDATION ────────────────────────────────────────────────────────
+    //
+    // backendIntensity range: 0.12 → 0.42
+    // This is passed directly as alpha — keeps coverage skin-blended always.
+    //
+    if (category == TryOnCategory.foundation) {
+      try {
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'foundationColor',
+          newParameter: vector.Vector4(r, g, b, backendIntensity),
+        );
+      } catch (e) {
+        debugPrint("❌ Foundation apply failed: $e");
+      }
+      return;
+    }
 
-    final colorVector = vector.Vector4(r, g, b, a);
-
-    try {
-      if (category == TryOnCategory.lipstick ||
-          category == TryOnCategory.lipGloss) {
+    // ── LIPSTICK ──────────────────────────────────────────────────────────
+    //
+    // Real lipstick physics:
+    //   • Moderate ambient (0.40) — lip has some fill colour in shadows
+    //   • Diffuse alpha: backendIntensity (0.30 → 0.68)
+    //   • Specular: very subtle (0.08, 0.08, 0.09) — lipstick is semi-matte
+    //   • Shininess: 18  (lower = wider softer highlight = matte-satin)
+    //
+    // Why this looks real: real lipstick reflects very little direct light.
+    // The colour sits on the lip surface. High specular or shininess = plastic.
+    //
+    if (category == TryOnCategory.lipstick) {
+      try {
         _deepArController.changeParameter(
           gameObject: gameObject,
           component: 'MeshRenderer',
           parameter: 'u_ambientColor',
-          newParameter: vector.Vector4(1.0, 1.0, 1.0, 1.0),
+          newParameter: vector.Vector4(0.40, 0.40, 0.40, 1.0),
         );
         _deepArController.changeParameter(
           gameObject: gameObject,
           component: 'MeshRenderer',
           parameter: 'u_diffuseColor',
-          newParameter: colorVector,
+          newParameter: vector.Vector4(r, g, b, backendIntensity),
         );
+        // Very low specular = matte-satin finish (not plastic)
         _deepArController.changeParameter(
           gameObject: gameObject,
           component: 'MeshRenderer',
           parameter: 'u_specularColor',
-          newParameter: vector.Vector4(0.2, 0.2, 0.2, 1.0),
+          newParameter: vector.Vector4(0.08, 0.08, 0.09, 1.0),
         );
+        // Shininess 18 = broad soft highlight (satin) vs 80+ (glass/plastic)
         _deepArController.changeParameter(
           gameObject: gameObject,
           component: 'MeshRenderer',
           parameter: 'u_shininess',
-          newParameter: category == TryOnCategory.lipGloss ? 60.0 : 25.0,
+          newParameter: 18.0,
         );
-      } else {
+      } catch (e) {
+        debugPrint("❌ Lipstick apply failed: $e");
+      }
+      return;
+    }
+
+    // ── LIP GLOSS ─────────────────────────────────────────────────────────
+    //
+    // Real gloss physics:
+    //   • Diffuse alpha: backendIntensity (0.38 → 0.60)
+    //     Lower alpha = see-through = the glossy translucency effect.
+    //     Higher alpha kills the gloss look.
+    //   • Ambient: 0.55 — enough fill to show colour in shade
+    //   • Specular: (0.85, 0.87, 0.90) — near-white, strong = visible gloss
+    //     Slightly blue-shifted (0.90 on B) = "wet" look
+    //   • Shininess: 72  (high but NOT 88+ which looks like glass/plastic)
+    //
+    // Key: The specular does the visual work of "glossy".
+    //      The diffuse keeps the tint readable.
+    //      This combo reads as "wet sheer tint" = real gloss.
+    //
+    if (category == TryOnCategory.lipGloss) {
+      try {
         _deepArController.changeParameter(
           gameObject: gameObject,
           component: 'MeshRenderer',
-          parameter: 'u_color',
-          newParameter: colorVector,
+          parameter: 'u_ambientColor',
+          newParameter: vector.Vector4(0.55, 0.55, 0.55, 1.0),
         );
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_diffuseColor',
+          newParameter: vector.Vector4(r, g, b, backendIntensity),
+        );
+        // Near-white, slightly cool specular = the "wet gloss" highlight
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_specularColor',
+          newParameter: vector.Vector4(0.85, 0.87, 0.90, 1.0),
+        );
+        // 72 = tight enough to look glossy, not so tight it looks like glass
+        _deepArController.changeParameter(
+          gameObject: gameObject,
+          component: 'MeshRenderer',
+          parameter: 'u_shininess',
+          newParameter: 72.0,
+        );
+      } catch (e) {
+        debugPrint("❌ Lip Gloss apply failed: $e");
       }
+      return;
+    }
+
+    // ── EYESHADOW / EYELINER / BLUSH / HIGHLIGHTER ────────────────────────
+    // backendIntensity is already the physically correct alpha for each.
+    try {
+      _deepArController.changeParameter(
+        gameObject: gameObject,
+        component: 'MeshRenderer',
+        parameter: 'u_color',
+        newParameter: vector.Vector4(r, g, b, backendIntensity),
+      );
     } catch (e) {
       debugPrint("❌ Apply failed for $gameObject: $e");
     }
@@ -508,6 +679,7 @@ class _TryOnScreenState extends State<TryOnScreen>
     for (var item in items) {
       final productKey = item['product_key'] as String;
       final shadeKey = item['shade_key'] as String;
+      // DB stores 0–100; convert to 0.0–1.0 for slider
       final intensity = (item['intensity'] as num).toDouble() / 100.0;
       TryOnCategory? cat;
       if (productKey.startsWith('lsh_'))
@@ -564,13 +736,21 @@ class _TryOnScreenState extends State<TryOnScreen>
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to save looks.')),
+        SnackBar(
+          content: Text('Please sign in to save looks.',
+              style: TextStyle(color: Colors.white)),
+          backgroundColor: AppColors.primary,
+        ),
       );
       return;
     }
     if (!_selectedShades.values.any((s) => s != null)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please apply some makeup first!')),
+        SnackBar(
+          content: Text('Please apply some makeup first!',
+              style: TextStyle(color: Colors.white)),
+          backgroundColor: AppColors.primary,
+        ),
       );
       return;
     }
@@ -612,6 +792,7 @@ class _TryOnScreenState extends State<TryOnScreen>
             'look_id': lookId,
             'product_key': shade.productKey,
             'shade_key': shade.shadeKey,
+            // Save user-facing 0–100 value (NOT the backend-mapped value)
             'intensity': ((_intensities[entry.key] ?? 0.5) * 100).toInt(),
             'layer_order': layerOrder++,
           });
@@ -642,7 +823,8 @@ class _TryOnScreenState extends State<TryOnScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+          SnackBar(
+              content: Text('Failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
@@ -667,18 +849,14 @@ class _TryOnScreenState extends State<TryOnScreen>
             child: Container(
               padding: const EdgeInsets.all(28),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.96),
+                color: AppColors.surface.withOpacity(0.96),
                 borderRadius: BorderRadius.circular(32),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.7),
-                  width: 1,
-                ),
+                border: Border.all(color: AppColors.border, width: 1),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header icon + text
                   Row(
                     children: [
                       Container(
@@ -728,8 +906,6 @@ class _TryOnScreenState extends State<TryOnScreen>
                     ],
                   ),
                   const SizedBox(height: 24),
-
-                  // Text field
                   Container(
                     decoration: BoxDecoration(
                       color: AppColors.background,
@@ -764,8 +940,6 @@ class _TryOnScreenState extends State<TryOnScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // Buttons
                   Row(
                     children: [
                       Expanded(
@@ -876,9 +1050,7 @@ class _TryOnScreenState extends State<TryOnScreen>
     final bool isLoggedIn = Supabase.instance.client.auth.currentUser != null;
     final topPad = MediaQuery.of(context).padding.top;
     final botPad = MediaQuery.of(context).padding.bottom;
-    final screenHeight = MediaQuery.of(context).size.height;
 
-    // Panel height: fixed so camera always gets ~55% of screen
     const double panelHeight = 320.0;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -890,17 +1062,15 @@ class _TryOnScreenState extends State<TryOnScreen>
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            // ── CAMERA — fills the full screen behind everything ───────────
+            // ── CAMERA ────────────────────────────────────────────────────
             if (_isInitialized)
               SizedBox.expand(child: DeepArPreview(_deepArController))
             else
               const _LoadingView(),
 
-            // ── SUBTLE TOP GRADIENT — only for top bar legibility ──────────
+            // ── TOP GRADIENT ───────────────────────────────────────────
             Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
+              top: 0, left: 0, right: 0,
               height: topPad + 100,
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -916,11 +1086,9 @@ class _TryOnScreenState extends State<TryOnScreen>
               ),
             ),
 
-            // ── SUBTLE BOTTOM GRADIENT — blends camera into panel ─────────
+            // ── BOTTOM GRADIENT ────────────────────────────────────────
             Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
+              bottom: 0, left: 0, right: 0,
               height: panelHeight + 60,
               child: DecoratedBox(
                 decoration: BoxDecoration(
@@ -936,7 +1104,7 @@ class _TryOnScreenState extends State<TryOnScreen>
               ),
             ),
 
-            // ── TOP BAR ───────────────────────────────────────────────────
+            // ── TOP BAR ───────────────────────────────────────────────
             Positioned(
               top: topPad + 10,
               left: 18,
@@ -948,7 +1116,6 @@ class _TryOnScreenState extends State<TryOnScreen>
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      // Back button
                       _TopBarButton(
                         onTap: () {
                           ScaffoldMessenger.of(context).clearSnackBars();
@@ -960,8 +1127,6 @@ class _TryOnScreenState extends State<TryOnScreen>
                           size: 16,
                         ),
                       ),
-
-                      // Center title badge
                       ClipRRect(
                         borderRadius: BorderRadius.circular(50),
                         child: BackdropFilter(
@@ -990,9 +1155,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                     shape: BoxShape.circle,
                                     boxShadow: [
                                       BoxShadow(
-                                        color: AppColors.primary.withOpacity(
-                                          0.7,
-                                        ),
+                                        color: AppColors.primary.withOpacity(0.7),
                                         blurRadius: 6,
                                       ),
                                     ],
@@ -1013,8 +1176,6 @@ class _TryOnScreenState extends State<TryOnScreen>
                           ),
                         ),
                       ),
-
-                      // Right side actions
                       Row(
                         children: [
                           _TopBarPill(
@@ -1023,8 +1184,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                     final items = await Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) =>
-                                            const SavedLooksScreen(),
+                                        builder: (_) => const SavedLooksScreen(),
                                       ),
                                     );
                                     if (items != null && items is List) {
@@ -1032,8 +1192,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                     }
                                   }
                                 : () => _showLoginPrompt(
-                                    'Sign in to view your saved looks!',
-                                  ),
+                                    'Sign in to view your saved looks!'),
                             icon: Icons.favorite_border_rounded,
                             label: 'Saved',
                           ),
@@ -1045,7 +1204,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                   context,
                                   MaterialPageRoute(
                                     builder: (context) =>
-                                        const ProfileScreen(), // Apni Profile Screen ka class name yahan likhein
+                                        const ProfileScreen(),
                                   ),
                                 );
                               } else {
@@ -1074,7 +1233,7 @@ class _TryOnScreenState extends State<TryOnScreen>
               ),
             ),
 
-            // ── BOTTOM PANEL ──────────────────────────────────────────────
+            // ── BOTTOM PANEL ──────────────────────────────────────────
             Positioned(
               left: 0,
               right: 0,
@@ -1091,14 +1250,13 @@ class _TryOnScreenState extends State<TryOnScreen>
                       filter: ImageFilter.blur(sigmaX: 28, sigmaY: 28),
                       child: Container(
                         decoration: BoxDecoration(
-                          // Subtle warm-tinted glass
-                          color: Colors.white.withOpacity(0.91),
+                          color: AppColors.surface.withOpacity(0.95),
                           borderRadius: const BorderRadius.vertical(
                             top: Radius.circular(36),
                           ),
                           border: Border(
                             top: BorderSide(
-                              color: Colors.white.withOpacity(0.80),
+                              color: AppColors.border,
                               width: 1.2,
                             ),
                           ),
@@ -1113,34 +1271,25 @@ class _TryOnScreenState extends State<TryOnScreen>
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Drag handle
                             Padding(
-                              padding: const EdgeInsets.only(
-                                top: 14,
-                                bottom: 2,
-                              ),
+                              padding: const EdgeInsets.only(top: 14, bottom: 2),
                               child: Container(
                                 width: 40,
                                 height: 4,
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withOpacity(0.12),
+                                  color: AppColors.textMuted.withOpacity(0.3),
                                   borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
                             ),
-
                             Padding(
                               padding: EdgeInsets.fromLTRB(
-                                20,
-                                12,
-                                20,
-                                botPad + 18,
-                              ),
+                                  20, 12, 20, botPad + 18),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  // ── Header row ───────────────────────
+                                  // Header row
                                   Row(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.center,
@@ -1173,8 +1322,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                                 const SizedBox(width: 5),
                                                 Text(
                                                   _getCategoryName(
-                                                    _currentCategory,
-                                                  ),
+                                                      _currentCategory),
                                                   style: TextStyle(
                                                     fontSize: 12.5,
                                                     color: AppColors.primary,
@@ -1186,32 +1334,27 @@ class _TryOnScreenState extends State<TryOnScreen>
                                           ],
                                         ),
                                       ),
-
                                       // Save button
                                       GestureDetector(
                                         onTap: isLoggedIn
                                             ? _showSaveLookDialog
                                             : () => _showLoginPrompt(
-                                                'Sign in to save your look!',
-                                              ),
+                                                'Sign in to save your look!'),
                                         child: AnimatedContainer(
                                           duration: const Duration(
-                                            milliseconds: 200,
-                                          ),
+                                              milliseconds: 200),
                                           padding: const EdgeInsets.symmetric(
-                                            horizontal: 16,
-                                            vertical: 10,
-                                          ),
+                                              horizontal: 16, vertical: 10),
                                           decoration: BoxDecoration(
                                             gradient: isLoggedIn
                                                 ? LinearGradient(
                                                     colors: [
                                                       AppColors.primary,
                                                       AppColors.primary.withRed(
-                                                        (AppColors.primary.red +
-                                                                28)
-                                                            .clamp(0, 255),
-                                                      ),
+                                                          (AppColors.primary
+                                                                      .red +
+                                                                  28)
+                                                              .clamp(0, 255)),
                                                     ],
                                                     begin: Alignment.topLeft,
                                                     end: Alignment.bottomRight,
@@ -1220,21 +1363,17 @@ class _TryOnScreenState extends State<TryOnScreen>
                                             color: isLoggedIn
                                                 ? null
                                                 : Colors.black.withOpacity(
-                                                    0.06,
-                                                  ),
-                                            borderRadius: BorderRadius.circular(
-                                              50,
-                                            ),
+                                                    0.06),
+                                            borderRadius:
+                                                BorderRadius.circular(50),
                                             boxShadow: isLoggedIn
                                                 ? [
                                                     BoxShadow(
                                                       color: AppColors.primary
                                                           .withOpacity(0.35),
                                                       blurRadius: 16,
-                                                      offset: const Offset(
-                                                        0,
-                                                        5,
-                                                      ),
+                                                      offset:
+                                                          const Offset(0, 5),
                                                     ),
                                                   ]
                                                 : null,
@@ -1270,33 +1409,34 @@ class _TryOnScreenState extends State<TryOnScreen>
 
                                   const SizedBox(height: 16),
 
-                                  // ── Category Tabs ─────────────────────
+                                  // Category Tabs
                                   SingleChildScrollView(
                                     scrollDirection: Axis.horizontal,
                                     physics: const BouncingScrollPhysics(),
                                     child: Row(
                                       children: TryOnCategory.values
-                                          .map((cat) => _buildCategoryTab(cat))
+                                          .map((cat) =>
+                                              _buildCategoryTab(cat))
                                           .toList(),
                                     ),
                                   ),
 
                                   const SizedBox(height: 16),
 
-                                  // ── Shade label + dot ─────────────────
+                                  // Shade label
                                   Row(
                                     children: [
                                       Container(
                                         width: 3,
                                         height: 14,
-                                        margin: const EdgeInsets.only(right: 8),
+                                        margin:
+                                            const EdgeInsets.only(right: 8),
                                         decoration: BoxDecoration(
                                           color: currentSelectedShade != null
                                               ? AppColors.primary
                                               : AppColors.border,
-                                          borderRadius: BorderRadius.circular(
-                                            2,
-                                          ),
+                                          borderRadius:
+                                              BorderRadius.circular(2),
                                         ),
                                       ),
                                       Expanded(
@@ -1311,21 +1451,21 @@ class _TryOnScreenState extends State<TryOnScreen>
                                                 : AppColors.textMuted,
                                             fontWeight:
                                                 currentSelectedShade != null
-                                                ? FontWeight.w600
-                                                : FontWeight.w400,
+                                                    ? FontWeight.w600
+                                                    : FontWeight.w400,
                                           ),
                                         ),
                                       ),
                                       if (currentSelectedShade != null)
                                         _MiniColorDot(
-                                          color: currentSelectedShade.color,
-                                        ),
+                                            color:
+                                                currentSelectedShade.color),
                                     ],
                                   ),
 
                                   const SizedBox(height: 10),
 
-                                  // ── Shades List ───────────────────────
+                                  // Shades List
                                   SizedBox(
                                     height: 52,
                                     child: _currentShades.isEmpty
@@ -1333,9 +1473,8 @@ class _TryOnScreenState extends State<TryOnScreen>
                                             child: Text(
                                               'No shades available',
                                               style: TextStyle(
-                                                color: AppColors.textMuted,
-                                                fontSize: 13,
-                                              ),
+                                                  color: AppColors.textMuted,
+                                                  fontSize: 13),
                                             ),
                                           )
                                         : ListView.builder(
@@ -1348,27 +1487,23 @@ class _TryOnScreenState extends State<TryOnScreen>
                                               if (index == 0) {
                                                 final cleared =
                                                     currentSelectedShade ==
-                                                    null;
+                                                        null;
                                                 return GestureDetector(
                                                   onTap: () {
-                                                    setState(
-                                                      () =>
-                                                          _selectedShades[_currentCategory] =
-                                                              null,
-                                                    );
+                                                    setState(() =>
+                                                        _selectedShades[
+                                                            _currentCategory] = null);
                                                     _applyColorToDeepAR(
-                                                      null,
-                                                      _currentCategory,
-                                                    );
+                                                        null,
+                                                        _currentCategory);
                                                   },
                                                   child: _ShadeCircle(
                                                     isSelected: cleared,
                                                     child: Icon(
-                                                      Icons.block_rounded,
-                                                      color:
-                                                          AppColors.textMuted,
-                                                      size: 18,
-                                                    ),
+                                                        Icons.block_rounded,
+                                                        color: AppColors
+                                                            .textMuted,
+                                                        size: 18),
                                                   ),
                                                 );
                                               }
@@ -1377,12 +1512,13 @@ class _TryOnScreenState extends State<TryOnScreen>
                                                   _currentShades[index - 1];
                                               final isSelected =
                                                   currentSelectedShade !=
-                                                      null &&
-                                                  shade.productKey ==
-                                                      currentSelectedShade
-                                                          .productKey;
+                                                          null &&
+                                                      shade.productKey ==
+                                                          currentSelectedShade
+                                                              .productKey;
 
-                                              Color displayColor = shade.color;
+                                              Color displayColor =
+                                                  shade.color;
                                               if ((_currentCategory ==
                                                           TryOnCategory
                                                               .eyelashes ||
@@ -1390,8 +1526,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                                                           TryOnCategory
                                                               .mascara) &&
                                                   _lashConfigs.containsKey(
-                                                    shade.productKey,
-                                                  )) {
+                                                      shade.productKey)) {
                                                 displayColor =
                                                     _lashConfigs[shade
                                                             .productKey]!
@@ -1400,15 +1535,12 @@ class _TryOnScreenState extends State<TryOnScreen>
 
                                               return GestureDetector(
                                                 onTap: () {
-                                                  setState(
-                                                    () =>
-                                                        _selectedShades[_currentCategory] =
-                                                            shade,
-                                                  );
+                                                  setState(() =>
+                                                      _selectedShades[
+                                                          _currentCategory] = shade);
                                                   _applyColorToDeepAR(
-                                                    shade,
-                                                    _currentCategory,
-                                                  );
+                                                      shade,
+                                                      _currentCategory);
                                                 },
                                                 child: _ShadeCircle(
                                                   color: displayColor,
@@ -1421,81 +1553,71 @@ class _TryOnScreenState extends State<TryOnScreen>
 
                                   const SizedBox(height: 12),
 
-                                  // ── Intensity Row ─────────────────────
+                                  // Intensity Row
+                                  // UI shows 0–100% but backend uses mapped values.
                                   Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 10,
-                                    ),
+                                        horizontal: 14, vertical: 10),
                                     decoration: BoxDecoration(
-                                      color: AppColors.primary.withOpacity(
-                                        0.05,
-                                      ),
-                                      borderRadius: BorderRadius.circular(16),
+                                      color: AppColors.primary
+                                          .withOpacity(0.05),
+                                      borderRadius:
+                                          BorderRadius.circular(16),
                                       border: Border.all(
-                                        color: AppColors.primary.withOpacity(
-                                          0.10,
-                                        ),
-                                        width: 1,
-                                      ),
+                                          color: AppColors.primary
+                                              .withOpacity(0.10),
+                                          width: 1),
                                     ),
                                     child: Row(
                                       children: [
-                                        Icon(
-                                          Icons.water_drop_outlined,
-                                          color: AppColors.primary.withOpacity(
-                                            0.7,
-                                          ),
-                                          size: 16,
-                                        ),
+                                        Icon(Icons.water_drop_outlined,
+                                            color: AppColors.primary
+                                                .withOpacity(0.7),
+                                            size: 16),
                                         const SizedBox(width: 7),
                                         Text(
                                           'Intensity',
                                           style: TextStyle(
-                                            fontSize: 12,
-                                            color: AppColors.textMuted,
-                                            fontWeight: FontWeight.w600,
-                                          ),
+                                              fontSize: 12,
+                                              color: AppColors.textMuted,
+                                              fontWeight: FontWeight.w600),
                                         ),
                                         Expanded(
                                           child: SliderTheme(
-                                            data: SliderTheme.of(context).copyWith(
+                                            data: SliderTheme.of(context)
+                                                .copyWith(
                                               activeTrackColor:
                                                   AppColors.primary,
-                                              inactiveTrackColor: AppColors
-                                                  .primary
-                                                  .withOpacity(0.12),
+                                              inactiveTrackColor:
+                                                  AppColors.primary
+                                                      .withOpacity(0.12),
                                               thumbColor: Colors.white,
                                               overlayColor: AppColors.primary
                                                   .withOpacity(0.12),
                                               thumbShape:
                                                   const RoundSliderThumbShape(
-                                                    enabledThumbRadius: 8,
-                                                  ),
+                                                      enabledThumbRadius: 8),
                                               trackHeight: 2.5,
                                               overlayShape:
                                                   const RoundSliderOverlayShape(
-                                                    overlayRadius: 18,
-                                                  ),
+                                                      overlayRadius: 18),
                                             ),
                                             child: Slider(
                                               value: currentIntensity,
-                                              min: 0.1,
+                                              min: 0.0,
                                               max: 1.0,
                                               onChanged:
-                                                  currentSelectedShade == null
-                                                  ? null
-                                                  : (val) {
-                                                      setState(
-                                                        () =>
-                                                            _intensities[_currentCategory] =
-                                                                val,
-                                                      );
-                                                      _applyColorToDeepAR(
-                                                        currentSelectedShade,
-                                                        _currentCategory,
-                                                      );
-                                                    },
+                                                  currentSelectedShade ==
+                                                          null
+                                                      ? null
+                                                      : (val) {
+                                                          setState(() =>
+                                                              _intensities[
+                                                                  _currentCategory] = val);
+                                                          _applyColorToDeepAR(
+                                                              currentSelectedShade,
+                                                              _currentCategory);
+                                                        },
                                             ),
                                           ),
                                         ),
@@ -1503,12 +1625,12 @@ class _TryOnScreenState extends State<TryOnScreen>
                                           width: 42,
                                           alignment: Alignment.center,
                                           child: Text(
-                                            '${(currentIntensity * 100).toInt()}%',
+                                            // Show 0–100% to user
+                                            '${(currentIntensity * 100).round()}%',
                                             style: TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.primary,
-                                              fontWeight: FontWeight.w800,
-                                            ),
+                                                fontSize: 12,
+                                                color: AppColors.primary,
+                                                fontWeight: FontWeight.w800),
                                           ),
                                         ),
                                       ],
@@ -1543,7 +1665,8 @@ class _TryOnScreenState extends State<TryOnScreen>
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         margin: const EdgeInsets.only(right: 7),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(50),
@@ -1551,17 +1674,16 @@ class _TryOnScreenState extends State<TryOnScreen>
             color: isSelected
                 ? AppColors.primary
                 : hasShade
-                ? AppColors.primary.withOpacity(0.35)
-                : Colors.black.withOpacity(0.10),
+                    ? AppColors.primary.withOpacity(0.35)
+                    : AppColors.border,
             width: isSelected ? 0 : 1.2,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: AppColors.primary.withOpacity(0.30),
-                    blurRadius: 12,
-                    offset: const Offset(0, 4),
-                  ),
+                      color: AppColors.primary.withOpacity(0.30),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4))
                 ]
               : null,
         ),
@@ -1574,8 +1696,8 @@ class _TryOnScreenState extends State<TryOnScreen>
               color: isSelected
                   ? Colors.white
                   : hasShade
-                  ? AppColors.primary
-                  : AppColors.textMuted,
+                      ? AppColors.primary
+                      : AppColors.textMuted,
             ),
             const SizedBox(width: 5),
             Text(
@@ -1584,11 +1706,10 @@ class _TryOnScreenState extends State<TryOnScreen>
                 color: isSelected
                     ? Colors.white
                     : hasShade
-                    ? AppColors.primary
-                    : AppColors.textMuted,
-                fontWeight: isSelected || hasShade
-                    ? FontWeight.w700
-                    : FontWeight.w500,
+                        ? AppColors.primary
+                        : AppColors.textMuted,
+                fontWeight:
+                    isSelected || hasShade ? FontWeight.w700 : FontWeight.w500,
                 fontSize: 12.5,
               ),
             ),
@@ -1601,9 +1722,7 @@ class _TryOnScreenState extends State<TryOnScreen>
                   color: _selectedShades[cat]!.color,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: AppColors.primary.withOpacity(0.4),
-                    width: 0.8,
-                  ),
+                      color: AppColors.primary.withOpacity(0.4), width: 0.8),
                 ),
               ),
             ],
@@ -1622,23 +1741,20 @@ class _LoadingView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black,
+      color: AppColors.background,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircularProgressIndicator(
-              color: AppColors.primary,
-              strokeWidth: 1.5,
-            ),
+                color: AppColors.primary, strokeWidth: 1.5),
             const SizedBox(height: 18),
             Text(
               'Preparing AR experience…',
               style: TextStyle(
-                color: Colors.white.withOpacity(0.45),
-                fontSize: 12.5,
-                letterSpacing: 0.6,
-              ),
+                  color: AppColors.textMuted,
+                  fontSize: 12.5,
+                  letterSpacing: 0.6),
             ),
           ],
         ),
@@ -1647,7 +1763,6 @@ class _LoadingView extends StatelessWidget {
   }
 }
 
-/// Frosted glass circular icon button for the top bar
 class _TopBarButton extends StatelessWidget {
   final VoidCallback onTap;
   final Widget child;
@@ -1667,9 +1782,7 @@ class _TopBarButton extends StatelessWidget {
               color: Colors.white.withOpacity(0.15),
               shape: BoxShape.circle,
               border: Border.all(
-                color: Colors.white.withOpacity(0.25),
-                width: 1,
-              ),
+                  color: Colors.white.withOpacity(0.25), width: 1),
             ),
             child: Center(child: child),
           ),
@@ -1679,16 +1792,12 @@ class _TopBarButton extends StatelessWidget {
   }
 }
 
-/// Frosted glass pill button for top bar (Saved)
 class _TopBarPill extends StatelessWidget {
   final VoidCallback onTap;
   final IconData icon;
   final String label;
-  const _TopBarPill({
-    required this.onTap,
-    required this.icon,
-    required this.label,
-  });
+  const _TopBarPill(
+      {required this.onTap, required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
@@ -1699,14 +1808,13 @@ class _TopBarPill extends StatelessWidget {
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
               color: Colors.white.withOpacity(0.15),
               borderRadius: BorderRadius.circular(50),
               border: Border.all(
-                color: Colors.white.withOpacity(0.25),
-                width: 1,
-              ),
+                  color: Colors.white.withOpacity(0.25), width: 1),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1716,10 +1824,9 @@ class _TopBarPill extends StatelessWidget {
                 Text(
                   label,
                   style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12.5,
-                  ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 12.5),
                 ),
               ],
             ),
@@ -1744,10 +1851,10 @@ class _ShadeCircle extends StatelessWidget {
       width: 46,
       height: 46,
       decoration: BoxDecoration(
-        color: color ?? Colors.white,
+        color: color ?? AppColors.surface,
         shape: BoxShape.circle,
         border: Border.all(
-          color: isSelected ? AppColors.primary : Colors.white,
+          color: isSelected ? AppColors.primary : AppColors.surface,
           width: isSelected ? 3 : 2,
         ),
         boxShadow: [
@@ -1763,17 +1870,17 @@ class _ShadeCircle extends StatelessWidget {
       child: child != null
           ? Center(child: child)
           : isSelected
-          ? Center(
-              child: Container(
-                width: 11,
-                height: 11,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.88),
-                  shape: BoxShape.circle,
-                ),
-              ),
-            )
-          : null,
+              ? Center(
+                  child: Container(
+                    width: 11,
+                    height: 11,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.88),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                )
+              : null,
     );
   }
 }
@@ -1793,10 +1900,7 @@ class _MiniColorDot extends StatelessWidget {
         border: Border.all(color: Colors.white, width: 2.5),
         boxShadow: [
           BoxShadow(
-            color: color.withOpacity(0.45),
-            blurRadius: 7,
-            spreadRadius: 1,
-          ),
+              color: color.withOpacity(0.45), blurRadius: 7, spreadRadius: 1),
         ],
       ),
     );

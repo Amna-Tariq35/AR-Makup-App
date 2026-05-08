@@ -2,6 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../utils/app_colors.dart'; // AppColors import zaroori hai
+import './saved_looks_screen.dart';
+import 'try_on_screen.dart';
+import './settings_screen.dart';
+import './privacy_security_screen.dart';
+import './edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -15,19 +21,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool notifications = true;
   bool isLoading = true;
 
-  // User Data Variables
   String userName = 'User';
   String userEmail = '';
   String avatarUrl = '';
   String initial = 'U';
-
-  // Colors based on your rosy theme
-  final Color primaryAccent = const Color(0xFFC06C84);
-  final Color secondaryRose = const Color(0xFFF4C2C2);
-  final Color bgColor = const Color(0xFFFAF7F5);
-  final Color textColor = const Color(0xFF1F1F1F);
-  final Color mutedText = const Color(0xFF8A8A8A);
-  final Color borderColor = Colors.black.withOpacity(0.05);
 
   @override
   void initState() {
@@ -36,35 +33,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _fetchUserData();
   }
 
-  // 1. Fetch Real User Data from Supabase Auth (No profiles table)
   Future<void> _fetchUserData() async {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
         setState(() {
           userEmail = user.email ?? 'No email';
-          
-          // Extract name from metadata (e.g., if signed in via Google)
-          // Fallback to the part of the email before '@'
           final metadata = user.userMetadata;
+          
           if (metadata != null && metadata.containsKey('full_name')) {
             userName = metadata['full_name'];
           } else if (metadata != null && metadata.containsKey('name')) {
             userName = metadata['name'];
           } else if (userEmail.contains('@')) {
-            userName = userEmail.split('@')[0];
-            // Capitalize first letter
-            userName = userName[0].toUpperCase() + userName.substring(1);
+            String namePart = userEmail.split('@')[0];
+            namePart = namePart.replaceAll(RegExp(r'[^a-zA-Z]'), ''); 
+            
+            if (namePart.isEmpty) {
+              userName = 'User'; 
+            } else {
+              userName = namePart[0].toUpperCase() + namePart.substring(1).toLowerCase();
+            }
           }
 
-          // Extract avatar from metadata (e.g., Google profile picture)
           if (metadata != null && metadata.containsKey('avatar_url')) {
             avatarUrl = metadata['avatar_url'];
-          } else if (metadata != null && metadata.containsKey('picture')) {
-            avatarUrl = metadata['picture'];
           }
-
-          // Set initial for fallback avatar
           if (userName.isNotEmpty) {
             initial = userName[0].toUpperCase();
           }
@@ -77,7 +71,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // 2. Check Real Camera Permission
+  void _navigateToTryOn() {
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (context) => const TryOnScreen()),
+      (route) => false,
+    );
+  }
+
+  void _navigateToGallery() {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const SavedLooksScreen()),
+    );
+  }
+
+  Future<void> _openSettings() async {
+  // 1. Settings screen par jao aur wapas aane ka wait karo
+  await Navigator.push(
+    context,
+    MaterialPageRoute(builder: (context) => const SettingsScreen()),
+  );
+
+  // 2. Jab user wapas aa jaye, toh ye line chalegi
+  // Yahan apna refresh logic dalo (jaise setState ya data fetch function)
+  setState(() {
+    // Isse UI rebuild ho jayegi aur naya data dikhega
+    print("User settings se wapas aa gaya, profile refresh ho rahi hai...");
+  });
+}
+
+  void _openPrivacySecurity() {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => const PrivacySecurityScreen()));
+  }
+
+  void _navigateToEditProfile() async {
+    final result = await Navigator.push(
+      context, 
+      MaterialPageRoute(builder: (context) => const EditProfileScreen())
+    );
+    
+    if (result == true) {
+      setState(() => isLoading = true); 
+      await _fetchUserData(); 
+    }
+  }
+
   Future<void> _checkPermissions() async {
     final status = await Permission.camera.status;
     setState(() {
@@ -85,61 +124,49 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
   }
 
-  // 3. Toggle Camera Permission Logic
   Future<void> _toggleCameraPermission(bool value) async {
     if (value) {
       final status = await Permission.camera.request();
       setState(() => cameraPermission = status.isGranted);
     } else {
-      // OS doesn't allow revoking permissions programmatically, so we open settings
       await openAppSettings();
     }
   }
 
-  // 4. Launch Web URLs
   Future<void> _launchUrl(String urlString) async {
     final Uri url = Uri.parse(urlString);
     if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not launch $urlString')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not launch $urlString')));
       }
     }
   }
 
-  // 5. Logout Logic
   Future<void> _handleLogout() async {
     try {
-      // Show loading indicator in dialog
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => Center(child: CircularProgressIndicator(color: primaryAccent)),
+        builder: (context) => Center(child: CircularProgressIndicator(color: AppColors.primary)),
       );
 
       await Supabase.instance.client.auth.signOut();
-      
+
       if (mounted) {
-        // Close loading dialog
         Navigator.pop(context);
-        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('Signed out successfully'),
-            backgroundColor: primaryAccent,
+            backgroundColor: AppColors.primary,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
         );
-        
-        // Navigate to TryOnScreen (assuming it's the main/home screen)
-        // Adjust the route name based on your app's routing setup
-        Navigator.of(context).pushNamedAndRemoveUntil('/try_on', (route) => false);
+        _navigateToTryOn();
       }
     } catch (e) {
       if (mounted) {
-        Navigator.pop(context); // Close dialog
+        Navigator.pop(context); 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error signing out: $e'), backgroundColor: Colors.red),
         );
@@ -147,75 +174,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Navigation Helpers
-  void _navigateToTryOn() {
-    // Assuming '/try_on' is your route name for TryOnScreen
-    Navigator.of(context).pushReplacementNamed('/try_on');
-  }
-
-  void _navigateToGallery() {
-    // Assuming '/saved_looks' is your route name for SavedLooksScreen
-    Navigator.of(context).pushReplacementNamed('/saved_looks');
-  }
-
-  void _openSettings() {
-    // Placeholder for general settings screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Opening General Settings...')),
-    );
-  }
-
-  void _openPrivacySecurity() {
-    // Placeholder for privacy settings screen
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Opening Privacy & Security Settings...')),
-    );
-  }
-
-  void _navigateToEditProfile() {
-    // Navigate to Edit Profile Screen
-    // Navigator.push(context, MaterialPageRoute(builder: (context) => const EditProfileScreen()));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Navigating to Edit Profile...')),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: AppColors.background,
       body: SafeArea(
-        child: isLoading 
-          ? Center(child: CircularProgressIndicator(color: primaryAccent))
-          : Column(
-              children: [
-                _buildHeader(),
-                Expanded(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 24),
-                          _buildProfileInfo(),
-                          const SizedBox(height: 32),
-                          _buildSavedLooksShortcut(),
-                          const SizedBox(height: 32),
-                          _buildWebIntegrations(),
-                          const SizedBox(height: 32),
-                          _buildSettings(),
-                          const SizedBox(height: 24),
-                          _buildLogoutButton(),
-                          const SizedBox(height: 40),
-                        ],
+        child: isLoading
+            ? Center(child: CircularProgressIndicator(color: AppColors.primary))
+            : Column(
+                children: [
+                  _buildHeader(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                        child: Column(
+                          children: [
+                            const SizedBox(height: 24),
+                            _buildProfileInfo(),
+                            const SizedBox(height: 32),
+                            _buildSavedLooksShortcut(),
+                            const SizedBox(height: 32),
+                            _buildWebIntegrations(),
+                            const SizedBox(height: 32),
+                            _buildSettings(),
+                            const SizedBox(height: 24),
+                            _buildLogoutButton(),
+                            const SizedBox(height: 40),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                _buildBottomNav(),
-              ],
-            ),
+                  _buildBottomNav(),
+                ],
+              ),
       ),
     );
   }
@@ -230,7 +224,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Text(
             'Profile',
             style: TextStyle(
-              color: textColor,
+              color: AppColors.textMain,
               fontSize: 18,
               fontWeight: FontWeight.w600,
               letterSpacing: -0.5,
@@ -247,15 +241,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       width: 40,
       height: 40,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         shape: BoxShape.circle,
-        border: Border.all(color: borderColor),
+        border: Border.all(color: AppColors.border),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 4, offset: const Offset(0, 2)),
         ],
       ),
       child: Material(
@@ -263,7 +253,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: onTap,
-          child: Icon(icon, color: textColor, size: 20),
+          child: Icon(icon, color: AppColors.textMain, size: 20),
         ),
       ),
     );
@@ -282,18 +272,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topRight,
                   end: Alignment.bottomLeft,
-                  colors: [primaryAccent, secondaryRose],
+                  colors: [AppColors.primary, AppColors.secondary],
                 ),
               ),
               child: CircleAvatar(
                 radius: 44,
-                backgroundColor: Colors.white,
+                backgroundColor: AppColors.surface,
                 backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-                child: avatarUrl.isEmpty 
+                child: avatarUrl.isEmpty
                     ? Text(
-                        initial, 
-                        style: TextStyle(color: primaryAccent, fontSize: 32, fontWeight: FontWeight.bold)
-                      ) 
+                        initial,
+                        style: TextStyle(color: AppColors.primary, fontSize: 32, fontWeight: FontWeight.bold),
+                      )
                     : null,
               ),
             ),
@@ -301,53 +291,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 shape: BoxShape.circle,
-                border: Border.all(color: borderColor),
+                border: Border.all(color: AppColors.border),
                 boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
+                  BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 4, offset: const Offset(0, 2)),
                 ],
               ),
-              child: Icon(Icons.camera_alt_outlined, color: primaryAccent, size: 16),
+              child: Icon(Icons.camera_alt_outlined, color: AppColors.primary, size: 16),
             ),
           ],
         ),
         const SizedBox(height: 16),
         Text(
           userName,
-          style: TextStyle(
-            color: textColor,
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            letterSpacing: -0.5,
-          ),
+          style: TextStyle(color: AppColors.textMain, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: -0.5),
         ),
         const SizedBox(height: 4),
-        Text(
-          userEmail,
-          style: TextStyle(color: mutedText, fontSize: 14),
-        ),
+        Text(userEmail, style: TextStyle(color: AppColors.textMuted, fontSize: 14)),
         const SizedBox(height: 20),
         OutlinedButton(
           onPressed: _navigateToEditProfile,
           style: OutlinedButton.styleFrom(
-            foregroundColor: primaryAccent,
-            side: BorderSide(color: primaryAccent.withOpacity(0.3)),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(30),
-            ),
+            foregroundColor: AppColors.primary,
+            side: BorderSide(color: AppColors.primary.withOpacity(0.3)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            backgroundColor: Colors.white,
+            backgroundColor: AppColors.surface,
             elevation: 0,
           ),
-          child: const Text(
-            'Edit Profile',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-          ),
+          child: const Text('Edit Profile', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
         ),
       ],
     );
@@ -359,15 +332,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor),
+          border: Border.all(color: AppColors.border),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, offset: const Offset(0, 4)),
           ],
         ),
         child: Row(
@@ -376,33 +345,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                color: secondaryRose.withOpacity(0.3),
+                color: AppColors.secondary.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.image_outlined, color: primaryAccent),
+              child: Icon(Icons.image_outlined, color: AppColors.primary),
             ),
             const SizedBox(width: 16),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'My Saved Looks',
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  Text('My Saved Looks', style: TextStyle(color: AppColors.textMain, fontSize: 16, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 2),
-                  Text(
-                    'View your AR try-on gallery',
-                    style: TextStyle(color: mutedText, fontSize: 12),
-                  ),
+                  Text('View your AR try-on gallery', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, color: mutedText),
+            Icon(Icons.chevron_right, color: AppColors.textMuted),
           ],
         ),
       ),
@@ -417,41 +376,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
           padding: const EdgeInsets.only(left: 4, bottom: 12),
           child: Text(
             'EXPLORE ON WEB',
-            style: TextStyle(
-              color: mutedText,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-            ),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
           ),
         ),
-        // Skin Analysis Banner -> Opens Ngrok URL
         GestureDetector(
           onTap: () => _launchUrl('https://tommie-mushy-noumenally.ngrok-free.dev/skin-analysis'),
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [primaryAccent, const Color(0xFFD88A9F)],
-              ),
+              gradient: LinearGradient(colors: [AppColors.primary, const Color(0xFFD88A9F)]),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: primaryAccent.withOpacity(0.3),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              boxShadow: [BoxShadow(color: AppColors.primary.withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4))],
             ),
             child: Row(
               children: [
                 Container(
                   width: 40,
                   height: 40,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
-                    shape: BoxShape.circle,
-                  ),
+                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
                   child: const Icon(Icons.auto_awesome, color: Colors.white, size: 20),
                 ),
                 const SizedBox(width: 12),
@@ -459,21 +401,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
-                        'AI Skin Analysis',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        'Get personalized routines',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.8),
-                          fontSize: 10,
-                        ),
-                      ),
+                      const Text('AI Skin Analysis', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                      Text('Get personalized routines', style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 10)),
                     ],
                   ),
                 ),
@@ -483,55 +412,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        // Web Store Banner -> Opens Ngrok URL
         GestureDetector(
           onTap: () => _launchUrl('https://tommie-mushy-noumenally.ngrok-free.dev/products'),
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: borderColor),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.03),
-                  blurRadius: 20,
-                  offset: const Offset(0, 4),
-                ),
-              ],
+              border: Border.all(color: AppColors.border),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, offset: const Offset(0, 4))],
             ),
             child: Row(
               children: [
                 Container(
                   width: 40,
                   height: 40,
-                  decoration: BoxDecoration(
-                    color: bgColor,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(Icons.shopping_bag_outlined, color: primaryAccent, size: 20),
+                  decoration: BoxDecoration(color: AppColors.background, shape: BoxShape.circle),
+                  child: Icon(Icons.shopping_bag_outlined, color: AppColors.primary, size: 20),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Web Store',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        'Shop products & saved looks',
-                        style: TextStyle(color: mutedText, fontSize: 10),
-                      ),
+                      Text('Web Store', style: TextStyle(color: AppColors.textMain, fontSize: 14, fontWeight: FontWeight.w600)),
+                      Text('Shop products & saved looks', style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
                     ],
                   ),
                 ),
-                Icon(Icons.open_in_new, color: mutedText, size: 16),
+                Icon(Icons.open_in_new, color: AppColors.textMuted, size: 16),
               ],
             ),
           ),
@@ -548,26 +457,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           padding: const EdgeInsets.only(left: 4, bottom: 12),
           child: Text(
             'APP SETTINGS',
-            style: TextStyle(
-              color: mutedText,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.2,
-            ),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
           ),
         ),
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: borderColor),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 20,
-                offset: const Offset(0, 4),
-              ),
-            ],
+            border: Border.all(color: AppColors.border),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, offset: const Offset(0, 4))],
           ),
           child: Column(
             children: [
@@ -579,7 +477,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 toggleValue: cameraPermission,
                 onToggle: (val) => _toggleCameraPermission(val),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: AppColors.border),
               _buildSettingTile(
                 icon: Icons.notifications_outlined,
                 title: 'Notifications',
@@ -588,7 +486,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 toggleValue: notifications,
                 onToggle: (val) => setState(() => notifications = val),
               ),
-              Divider(height: 1, color: borderColor),
+              Divider(height: 1, color: AppColors.border),
               _buildSettingTile(
                 icon: Icons.shield_outlined,
                 title: 'Privacy & Security',
@@ -603,13 +501,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildSettingTile({
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    required bool hasToggle,
-    bool toggleValue = false,
-    ValueChanged<bool>? onToggle,
-    VoidCallback? onTap,
+    required IconData icon, required String title, String? subtitle, required bool hasToggle, bool toggleValue = false, ValueChanged<bool>? onToggle, VoidCallback? onTap,
   }) {
     return InkWell(
       onTap: hasToggle ? null : onTap,
@@ -618,34 +510,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(16.0),
         child: Row(
           children: [
-            Icon(icon, color: mutedText, size: 20),
+            Icon(icon, color: AppColors.textMuted, size: 20),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: textColor,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  Text(title, style: TextStyle(color: AppColors.textMain, fontSize: 14, fontWeight: FontWeight.w600)),
                   if (subtitle != null) ...[
                     const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: TextStyle(color: mutedText, fontSize: 10),
-                    ),
-                  ]
+                    Text(subtitle, style: TextStyle(color: AppColors.textMuted, fontSize: 10)),
+                  ],
                 ],
               ),
             ),
-            if (hasToggle)
-              _buildCustomToggle(toggleValue, onToggle!)
-            else
-              Icon(Icons.chevron_right, color: mutedText, size: 20),
+            if (hasToggle) _buildCustomToggle(toggleValue, onToggle!) else Icon(Icons.chevron_right, color: AppColors.textMuted, size: 20),
           ],
         ),
       ),
@@ -662,7 +541,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(12),
-          color: value ? primaryAccent : Colors.grey.shade300,
+          color: value ? AppColors.primary : Colors.grey.shade300,
         ),
         alignment: value ? Alignment.centerRight : Alignment.centerLeft,
         child: Container(
@@ -671,13 +550,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 2,
-                offset: const Offset(0, 1),
-              ),
-            ],
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 2, offset: const Offset(0, 1))],
           ),
         ),
       ),
@@ -689,23 +562,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: _handleLogout,
-        icon: Icon(Icons.logout, size: 18, color: primaryAccent),
+        icon: Icon(Icons.logout, size: 18, color: AppColors.primary),
         label: Text(
           'Sign Out',
-          style: TextStyle(
-            color: primaryAccent,
-            fontWeight: FontWeight.w600,
-            fontSize: 14,
-          ),
+          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600, fontSize: 14),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: primaryAccent,
+          backgroundColor: AppColors.surface,
+          foregroundColor: AppColors.primary,
           elevation: 0,
           padding: const EdgeInsets.symmetric(vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: borderColor),
+            side: BorderSide(color: AppColors.border),
           ),
         ),
       ),
@@ -716,8 +585,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: borderColor)),
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -739,16 +608,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: isActive ? primaryAccent : mutedText,
-              size: 24,
-            ),
+            Icon(icon, color: isActive ? AppColors.primary : AppColors.textMuted, size: 24),
             const SizedBox(height: 4),
             Text(
               label,
               style: TextStyle(
-                color: isActive ? primaryAccent : mutedText,
+                color: isActive ? AppColors.primary : AppColors.textMuted,
                 fontSize: 10,
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
               ),

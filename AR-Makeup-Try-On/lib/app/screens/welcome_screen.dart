@@ -11,8 +11,7 @@ class WelcomeScreen extends StatefulWidget {
   State<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
-class _WelcomeScreenState extends State<WelcomeScreen>
-    with SingleTickerProviderStateMixin {
+class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeIn;
   late Animation<Offset> _slideUp;
@@ -61,7 +60,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
-          // ── Hero Image — full bleed ──────────────────────────────
           Positioned.fill(
             child: Image.asset(
               'assets/images/hero_model.png',
@@ -69,8 +67,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               alignment: Alignment.topCenter,
             ),
           ),
-
-          // ── Gradient overlay: transparent top → opaque bottom ───
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -88,8 +84,6 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               ),
             ),
           ),
-
-          // ── Subtle left-edge vignette for depth ─────────────────
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -104,15 +98,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               ),
             ),
           ),
-
-          // ── Sparkle / decorative accent ─────────────────────────
           Positioned(
             top: size.height * 0.07,
             right: 28,
             child: _SparkleIcon(),
           ),
-
-          // ── Main content ─────────────────────────────────────────
           Positioned(
             left: 0,
             right: 0,
@@ -132,10 +122,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Tag pill
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
                           color: AppColors.primary.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(50),
@@ -146,8 +134,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.auto_awesome_rounded,
-                                size: 13, color: AppColors.primary),
+                            Icon(Icons.auto_awesome_rounded, size: 13, color: AppColors.primary),
                             const SizedBox(width: 6),
                             Text(
                               'AI-Powered AR Makeup',
@@ -161,10 +148,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 18),
-
-                      // Headline
                       Text(
                         'Discover Your\nPerfect Look',
                         style: TextStyle(
@@ -175,10 +159,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           letterSpacing: -0.5,
                         ),
                       ),
-
                       const SizedBox(height: 14),
-
-                      // Subtitle
                       Text(
                         'Try on thousands of shades in real-time AR —\nfind what truly suits your beautiful skin.',
                         style: TextStyle(
@@ -188,10 +169,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           letterSpacing: 0.1,
                         ),
                       ),
-
                       const SizedBox(height: 36),
-
-                      // ── Get Started Button ─────────────────────
                       _PrimaryButton(
                         label: 'Get Started',
                         icon: Icons.arrow_forward_rounded,
@@ -202,10 +180,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           );
                         },
                       ),
-
                       const SizedBox(height: 14),
-
-                      // ── Sign In Button ─────────────────────────
                       _SecondaryButton(
                         label: 'Sign In',
                         onPressed: () {
@@ -215,10 +190,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           );
                         },
                       ),
-
                       const SizedBox(height: 20),
-
-                      // Terms note
                       Center(
                         child: Text(
                           'By continuing you agree to our Terms & Privacy Policy',
@@ -242,23 +214,17 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
   PageRoute _fadeRoute(Widget page) => PageRouteBuilder(
         pageBuilder: (_, __, ___) => page,
-        transitionsBuilder: (_, anim, __, child) =>
-            FadeTransition(opacity: anim, child: child),
+        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 400),
       );
 }
 
-// ── Primary CTA Button ────────────────────────────────────────────────────────
 class _PrimaryButton extends StatefulWidget {
   final String label;
   final IconData icon;
   final VoidCallback onPressed;
 
-  const _PrimaryButton({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-  });
+  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
 
   @override
   State<_PrimaryButton> createState() => _PrimaryButtonState();
@@ -286,20 +252,14 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
             gradient: LinearGradient(
               colors: [
                 AppColors.primary,
-                AppColors.primary.withRed(
-                  (AppColors.primary.red + 30).clamp(0, 255),
-                ),
+                AppColors.primary.withRed((AppColors.primary.red + 30).clamp(0, 255)),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
-              BoxShadow(
-                color: AppColors.primary.withOpacity(0.45),
-                blurRadius: 22,
-                offset: const Offset(0, 8),
-              ),
+              BoxShadow(color: AppColors.primary.withOpacity(0.45), blurRadius: 22, offset: const Offset(0, 8)),
             ],
           ),
           child: Row(
@@ -307,21 +267,13 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
             children: [
               Text(
                 widget.label,
-                style: const TextStyle(
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white,
-                  letterSpacing: 0.3,
-                ),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 0.3),
               ),
               const SizedBox(width: 10),
               Container(
                 width: 32,
                 height: 32,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.22),
-                  borderRadius: BorderRadius.circular(10),
-                ),
+                decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(10)),
                 child: Icon(widget.icon, color: Colors.white, size: 18),
               ),
             ],
@@ -332,15 +284,11 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
   }
 }
 
-// ── Secondary Ghost Button ────────────────────────────────────────────────────
 class _SecondaryButton extends StatefulWidget {
   final String label;
   final VoidCallback onPressed;
 
-  const _SecondaryButton({
-    required this.label,
-    required this.onPressed,
-  });
+  const _SecondaryButton({required this.label, required this.onPressed});
 
   @override
   State<_SecondaryButton> createState() => _SecondaryButtonState();
@@ -367,27 +315,15 @@ class _SecondaryButtonState extends State<_SecondaryButton> {
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: AppColors.border.withOpacity(0.6),
-              width: 1.4,
-            ),
+            border: Border.all(color: AppColors.border.withOpacity(0.6), width: 1.4),
             boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
+              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4)),
             ],
           ),
           child: Center(
             child: Text(
               widget.label,
-              style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-                color: AppColors.primary,
-                letterSpacing: 0.3,
-              ),
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.primary, letterSpacing: 0.3),
             ),
           ),
         ),
@@ -396,27 +332,20 @@ class _SecondaryButtonState extends State<_SecondaryButton> {
   }
 }
 
-// ── Decorative Sparkle ────────────────────────────────────────────────────────
 class _SparkleIcon extends StatefulWidget {
   @override
   State<_SparkleIcon> createState() => _SparkleIconState();
 }
 
-class _SparkleIconState extends State<_SparkleIcon>
-    with SingleTickerProviderStateMixin {
+class _SparkleIconState extends State<_SparkleIcon> with SingleTickerProviderStateMixin {
   late AnimationController _c;
   late Animation<double> _pulse;
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 2200),
-    )..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.7, end: 1.0).animate(
-      CurvedAnimation(parent: _c, curve: Curves.easeInOut),
-    );
+    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 0.7, end: 1.0).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
   }
 
   @override
@@ -434,10 +363,7 @@ class _SparkleIconState extends State<_SparkleIcon>
         color: Colors.white.withOpacity(0.75),
         size: 22,
         shadows: [
-          Shadow(
-            color: AppColors.primary.withOpacity(0.6),
-            blurRadius: 12,
-          ),
+          Shadow(color: AppColors.primary.withOpacity(0.6), blurRadius: 12),
         ],
       ),
     );
