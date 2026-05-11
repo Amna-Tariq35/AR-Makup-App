@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart'; 
+import 'package:url_launcher/url_launcher.dart';
 import '../utils/app_colors.dart';
 
+// Update this when deploying to production
+const String _kHelpCenterUrl = 'https://your-production-domain.com/support';
+
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  String selectedLanguage = 'English (US)';
-  bool isDarkMode = false;
-  // Notifications abhi functional nahi hain toh flag hata diya hai
+  String _selectedLanguage = 'English (US)';
+  bool _isDarkMode = false;
 
   @override
   void initState() {
@@ -23,11 +25,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      selectedLanguage = prefs.getString('app_language') ?? 'English (US)';
-      isDarkMode = prefs.getBool('is_dark_mode') ?? false;
-      AppColors.themeNotifier.value = isDarkMode ? ThemeMode.dark : ThemeMode.light;
-    });
+    if (mounted) {
+      setState(() {
+        _selectedLanguage =
+            prefs.getString('app_language') ?? 'English (US)';
+        _isDarkMode = prefs.getBool('is_dark_mode') ?? false;
+        AppColors.themeNotifier.value =
+            _isDarkMode ? ThemeMode.dark : ThemeMode.light;
+      });
+    }
   }
 
   Future<void> _saveSetting(String key, dynamic value) async {
@@ -40,15 +46,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _launchHelpCenter() async {
-    final Uri url = Uri.parse('https://www.google.com'); // Abhi testing ke liye google
+    final Uri url = Uri.parse(_kHelpCenterUrl);
     try {
       if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
-        throw 'Could not launch $url';
+        throw Exception('Could not launch URL');
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open browser. Check your internet connection.', style: TextStyle(color: Colors.white)), backgroundColor: Colors.red),
+          SnackBar(
+            content: const Text(
+              'Could not open the help center. Please try again.',
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
         );
       }
     }
@@ -59,26 +73,137 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('Select Language', style: TextStyle(color: AppColors.textMain, fontWeight: FontWeight.bold)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: Text(
+          'Select Language',
+          style: TextStyle(
+              color: AppColors.textMain, fontWeight: FontWeight.bold),
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
-          children: ['English (US)', 'Urdu (Coming Soon)', 'Hindi (Coming Soon)'].map((lang) {
-            bool isComingSoon = lang.contains('Coming Soon');
-            return ListTile(
-              title: Text(lang, style: TextStyle(
-                color: isComingSoon ? AppColors.textMuted : AppColors.textMain,
-                fontStyle: isComingSoon ? FontStyle.italic : FontStyle.normal,
-              )),
-              trailing: selectedLanguage == lang ? Icon(Icons.check_circle, color: AppColors.primary) : null,
-              onTap: isComingSoon ? null : () {
-                setState(() => selectedLanguage = lang);
-                _saveSetting('app_language', lang);
-                Navigator.pop(context);
-              },
-            );
-          }).toList(),
+          children: [
+            _buildLanguageOption('English (US)', available: true),
+            _buildLanguageOption('Urdu', available: false),
+            _buildLanguageOption('Hindi', available: false),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageOption(String lang, {required bool available}) {
+    final isSelected = _selectedLanguage == lang;
+    return ListTile(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      title: Text(
+        lang,
+        style: TextStyle(
+          color: available ? AppColors.textMain : AppColors.textMuted,
+        ),
+      ),
+      trailing: !available
+          ? Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Soon',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.primary,
+                ),
+              ),
+            )
+          : (isSelected
+              ? Icon(Icons.check_circle, color: AppColors.primary)
+              : null),
+      onTap: available
+          ? () {
+              setState(() => _selectedLanguage = lang);
+              _saveSetting('app_language', lang);
+              Navigator.pop(context);
+            }
+          : null,
+    );
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.auto_awesome,
+                color: AppColors.primary,
+                size: 36,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'AR Makeup',
+              style: TextStyle(
+                color: AppColors.textMain,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Version 1.0.0',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'AI-powered augmented reality makeup try-on, skin analysis, and personalized beauty recommendations.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 13,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '© 2026 AR Makeup',
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'Close',
+              style: TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -94,68 +219,139 @@ class _SettingsScreenState extends State<SettingsScreen> {
             backgroundColor: AppColors.background,
             elevation: 0,
             iconTheme: IconThemeData(color: AppColors.textMain),
-            title: Text('Settings', style: TextStyle(color: AppColors.textMain, fontWeight: FontWeight.w600)),
+            title: Text(
+              'Settings',
+              style: TextStyle(
+                  color: AppColors.textMain, fontWeight: FontWeight.w600),
+            ),
           ),
           body: ListView(
             padding: const EdgeInsets.all(24),
             children: [
-              Text('PREFERENCES', style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-              const SizedBox(height: 16),
+              // ── Preferences ──────────────────────────────────────────
+              Text(
+                'PREFERENCES',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 12),
               Container(
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.02),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
                 child: Column(
                   children: [
-                    _buildInteractiveTile(Icons.language, 'Language', selectedLanguage, _showLanguageDialog),
+                    // Language
+                    _buildInteractiveTile(
+                      Icons.language,
+                      'Language',
+                      _selectedLanguage,
+                      _showLanguageDialog,
+                    ),
                     Divider(height: 1, color: AppColors.border),
+
+                    // Dark mode
                     ListTile(
-                      leading: Icon(Icons.dark_mode_outlined, color: AppColors.textMain),
-                      title: Text('Dark Theme', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textMain)),
+                      leading: Icon(
+                        _isDarkMode
+                            ? Icons.dark_mode
+                            : Icons.light_mode_outlined,
+                        color: AppColors.textMain,
+                      ),
+                      title: Text(
+                        'Dark Theme',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMain,
+                        ),
+                      ),
+                      subtitle: Text(
+                        _isDarkMode ? 'Dark mode is on' : 'Light mode is on',
+                        style: TextStyle(
+                            fontSize: 12, color: AppColors.textMuted),
+                      ),
                       trailing: Switch(
-                        value: isDarkMode,
+                        value: _isDarkMode,
                         activeColor: AppColors.primary,
                         onChanged: (val) {
-                          AppColors.themeNotifier.value = val ? ThemeMode.dark : ThemeMode.light;
-                          setState(() => isDarkMode = val);
+                          AppColors.themeNotifier.value =
+                              val ? ThemeMode.dark : ThemeMode.light;
+                          setState(() => _isDarkMode = val);
                           _saveSetting('is_dark_mode', val);
                         },
                       ),
                     ),
                     Divider(height: 1, color: AppColors.border),
-                    // Notifications par alert laga diya hai
-                    _buildInteractiveTile(Icons.notifications_active_outlined, 'Notifications', 'Coming Soon', () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Notification settings will be available in the next update!', style: TextStyle(color: Colors.white)),
-                          backgroundColor: AppColors.primary,
-                          behavior: SnackBarBehavior.floating,
-                        ),
-                      );
-                    }),
+
+                    // Notifications (coming soon)
+                    _buildComingSoonTile(
+                      Icons.notifications_outlined,
+                      'Notifications',
+                      'Push alerts for orders & looks',
+                    ),
                   ],
                 ),
               ),
-              
+
               const SizedBox(height: 32),
-              Text('SUPPORT & ABOUT', style: TextStyle(color: AppColors.textMuted, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
-              const SizedBox(height: 16),
+
+              // ── Support & About ───────────────────────────────────────
+              Text(
+                'SUPPORT & ABOUT',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1.2,
+                ),
+              ),
+              const SizedBox(height: 12),
               Container(
-                decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.border)),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppColors.border),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.02),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
                 child: Column(
                   children: [
-                    _buildInteractiveTile(Icons.help_outline, 'Help Center', 'FAQs & Contact Support', _launchHelpCenter),
+                    _buildInteractiveTile(
+                      Icons.help_outline,
+                      'Help Center',
+                      'FAQs & contact support',
+                      _launchHelpCenter,
+                    ),
                     Divider(height: 1, color: AppColors.border),
-                    _buildInteractiveTile(Icons.info_outline, 'About App', 'Version 1.0.0', () {
-                      showAboutDialog(
-                        context: context, 
-                        applicationName: 'AR Makeup App', 
-                        applicationVersion: 'v1.0.0', 
-                        applicationLegalese: '© 2026 Your Company Name',
-                        applicationIcon: Icon(Icons.auto_awesome, color: AppColors.primary, size: 40)
-                      );
-                    }),
+                    _buildInteractiveTile(
+                      Icons.info_outline,
+                      'About',
+                      'Version 1.0.0',
+                      _showAboutDialog,
+                    ),
                   ],
                 ),
               ),
+
+              const SizedBox(height: 40),
             ],
           ),
         );
@@ -163,13 +359,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildInteractiveTile(IconData icon, String title, String subtitle, VoidCallback onTap) {
+  Widget _buildInteractiveTile(
+    IconData icon,
+    String title,
+    String subtitle,
+    VoidCallback onTap,
+  ) {
     return ListTile(
       leading: Icon(icon, color: AppColors.textMain),
-      title: Text(title, style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.textMain)),
-      subtitle: Text(subtitle, style: TextStyle(fontSize: 12, color: AppColors.textMuted)),
+      title: Text(
+        title,
+        style: TextStyle(
+            fontWeight: FontWeight.w600, color: AppColors.textMain),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+      ),
       trailing: Icon(Icons.chevron_right, color: AppColors.textMuted),
       onTap: onTap,
+    );
+  }
+
+  Widget _buildComingSoonTile(
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
+    return ListTile(
+      leading: Icon(icon, color: AppColors.textMain),
+      title: Text(
+        title,
+        style: TextStyle(
+            fontWeight: FontWeight.w600, color: AppColors.textMain),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+      ),
+      trailing: Container(
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          'Soon',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: AppColors.primary,
+          ),
+        ),
+      ),
     );
   }
 }

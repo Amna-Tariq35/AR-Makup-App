@@ -7,6 +7,8 @@ import 'package:share_plus/share_plus.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import '../utils/app_colors.dart';
+import '../cache/looks_cache.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 // ── TAB ENUM ──────────────────────────────────────────────────────────────────
 
@@ -22,17 +24,20 @@ class SavedLooksScreen extends StatefulWidget {
 }
 
 class _SavedLooksScreenState extends State<SavedLooksScreen>
-    with SingleTickerProviderStateMixin {
-  bool _isLoading = true;
-  List<Map<String, dynamic>> _savedLooks = [];
+    with TickerProviderStateMixin {
+  // ── Cache reference ────────────────────────────────────────────────────────
+  final _cache = LooksCache.instance;
 
-  // Local set of favourited look IDs (persisted to Supabase column `is_favourite`)
+  // Local favourite set — kept in sync with cache
   final Set<String> _favouriteIds = {};
 
   _LooksTab _currentTab = _LooksTab.all;
 
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
+
+  // Per-card heart bounce controllers keyed by lookId
+  final Map<String, AnimationController> _heartControllers = {};
 
   final String _webBaseUrl =
       'https://tommie-mushy-noumenally.ngrok-free.dev/looks/';
@@ -42,49 +47,135 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
   @override
   void initState() {
     super.initState();
+
     _fadeCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 420),
+      value: 0.0, // Explicit start
     );
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
-    _fetchSavedLooks();
+
+    // Agar cache pehle se loaded hai toh animation skip karo — seedha 1.0 pe set karo
+    if (_cache.isLoaded) {
+      _fadeCtrl.value = 1.0;
+    }
+
+    for (final look in _cache.looks) {
+      if (look['is_favourite'] == true) {
+        _favouriteIds.add(look['id'] as String);
+      }
+    }
+
+    _cache.addListener(_onCacheUpdate);
+    _bootstrap();
   }
 
   @override
   void dispose() {
+    _cache.removeListener(_onCacheUpdate);
     _fadeCtrl.dispose();
+    for (final c in _heartControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
-  // ── FETCH ──────────────────────────────────────────────────────────────────
+  // ── CACHE LISTENER ─────────────────────────────────────────────────────────
 
-  Future<void> _fetchSavedLooks() async {
+  void _onCacheUpdate() {
+    if (!mounted) return;
+    // Re-sync favourite set with cache (handles external changes)
+    for (final look in _cache.looks) {
+      final id = look['id'] as String;
+      if (look['is_favourite'] == true) {
+        _favouriteIds.add(id);
+      } else {
+        _favouriteIds.remove(id);
+      }
+    }
+    setState(() {});
+  }
+
+  // ── BOOTSTRAP ──────────────────────────────────────────────────────────────
+  //
+  // If cache is already loaded → show instantly + precache images.
+  // If cache is loading → wait for it.
+  // If cache is empty (first open after cold start) → fetch now.
+  //
+  Future<void> _bootstrap() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return;
+
+    if (_cache.isLoaded) {
+      // Data already hai — seedha show karo
+      if (mounted) {
+        _favouriteIds.clear();
+        for (final look in _cache.looks) {
+          if (look['is_favourite'] == true) {
+            _favouriteIds.add(look['id'] as String);
+          }
+        }
+        setState(() {});
+        // Agar controller already complete hai toh reset karke forward karo
+        if (_fadeCtrl.isCompleted) {
+          _fadeCtrl.value = 1.0; // Already visible raho
+        } else {
+          _fadeCtrl.forward();
+        }
+        _precacheImages();
+      }
+      return;
+    }
+
     try {
-      final response = await Supabase.instance.client
-          .from('saved_looks')
-          .select()
-          .eq('user_id', userId)
-          .order('created_at', ascending: false);
+      await _cache.prefetch(userId);
+    } catch (_) {}
 
-      final looks = List<Map<String, dynamic>>.from(response);
-
-      // Populate favourites from DB column (if it exists); defaults to false
-      for (final look in looks) {
+    if (mounted) {
+      _favouriteIds.clear();
+      for (final look in _cache.looks) {
         if (look['is_favourite'] == true) {
           _favouriteIds.add(look['id'] as String);
         }
       }
-
-      setState(() {
-        _savedLooks = looks;
-        _isLoading = false;
-      });
+      setState(() {});
       _fadeCtrl.forward();
-    } catch (e) {
-      debugPrint("❌ Error fetching looks: $e");
-      setState(() => _isLoading = false);
+      _precacheImages();
+    }
+  }
+
+  // ── PRECACHE IMAGES ────────────────────────────────────────────────────────
+  //
+  // Tells Flutter's image cache to download all thumbnails in the background.
+  // When the list renders, images appear instantly from cache.
+  //
+  void _precacheImages() {
+    for (final look in _cache.looks) {
+      final url = look['preview_image_url'] as String?;
+      if (url != null && url.isNotEmpty) {
+        // CachedNetworkImage ka apna cache manager use karo
+        CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+      }
+    }
+  }
+
+  // ── REFRESH (pull-to-refresh) ──────────────────────────────────────────────
+
+  Future<void> _refresh() async {
+    final userId = Supabase.instance.client.auth.currentUser?.id;
+    if (userId == null) return;
+    _fadeCtrl.reset();
+    await _cache.refresh(userId);
+    _precacheImages();
+    if (mounted) {
+      _favouriteIds.clear();
+      for (final look in _cache.looks) {
+        if (look['is_favourite'] == true) {
+          _favouriteIds.add(look['id'] as String);
+        }
+      }
+      setState(() {});
+      _fadeCtrl.forward();
     }
   }
 
@@ -93,19 +184,42 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
   String _formatDate(String isoString) {
     final date = DateTime.parse(isoString).toLocal();
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${date.day} ${months[date.month - 1]}, ${date.year}';
   }
 
   List<Map<String, dynamic>> get _visibleLooks {
     if (_currentTab == _LooksTab.favourites) {
-      return _savedLooks
+      return _cache.looks
           .where((l) => _favouriteIds.contains(l['id'] as String))
           .toList();
     }
-    return _savedLooks;
+    return _cache.looks;
+  }
+
+  AnimationController _heartCtrl(String lookId) {
+    return _heartControllers.putIfAbsent(
+      lookId,
+      () => AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 300),
+        lowerBound: 0.85,
+        upperBound: 1.0,
+        value: 1.0,
+      ),
+    );
   }
 
   // ── TOGGLE FAVOURITE ───────────────────────────────────────────────────────
@@ -119,22 +233,31 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
         _favouriteIds.add(lookId);
       }
     });
-    // Haptic feedback
+    _cache.setFavourite(lookId, !wasLiked);
+
+    // Bounce animation
+    final ctrl = _heartCtrl(lookId);
+    ctrl.reverse().then((_) => ctrl.forward());
     HapticFeedback.lightImpact();
+
     try {
       await Supabase.instance.client
           .from('saved_looks')
-          .update({'is_favourite': !wasLiked}).eq('id', lookId);
+          .update({'is_favourite': !wasLiked})
+          .eq('id', lookId);
     } catch (e) {
-      // Revert on failure
-      setState(() {
-        if (wasLiked) {
-          _favouriteIds.add(lookId);
-        } else {
-          _favouriteIds.remove(lookId);
-        }
-      });
-      debugPrint("❌ Toggle favourite failed: $e");
+      // Revert optimistic update on failure
+      if (mounted) {
+        setState(() {
+          if (wasLiked) {
+            _favouriteIds.add(lookId);
+          } else {
+            _favouriteIds.remove(lookId);
+          }
+        });
+        _cache.setFavourite(lookId, wasLiked);
+      }
+      debugPrint('❌ Toggle favourite failed: $e');
     }
   }
 
@@ -151,6 +274,7 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border, width: 1),
           ),
           child: const Center(
             child: CircularProgressIndicator(
@@ -167,134 +291,149 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
           .select()
           .eq('look_id', lookId);
       if (mounted) {
-        Navigator.pop(context);
-        Navigator.pop(context, items);
+        Navigator.pop(context); // dismiss loader
+        Navigator.pop(context, items); // return to TryOnScreen
       }
     } catch (e) {
-      if (mounted) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to load look details.')),
-      );
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load look details.')),
+        );
+      }
     }
   }
 
   // ── DELETE LOOK ────────────────────────────────────────────────────────────
 
   Future<void> _deleteLook(String lookId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      barrierColor: Colors.black.withOpacity(0.55),
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Container(
-          padding: const EdgeInsets.all(28),
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: AppColors.border, width: 1),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.08),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.delete_outline_rounded,
-                  color: Colors.redAccent,
-                  size: 26,
-                ),
+    final confirm =
+        await showDialog<bool>(
+          context: context,
+          barrierColor: Colors.black.withValues(alpha: 0.55),
+          builder: (context) => Dialog(
+            backgroundColor: Colors.transparent,
+            insetPadding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Container(
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(color: AppColors.border, width: 1),
               ),
-              const SizedBox(height: 18),
-              Text(
-                'Delete Look?',
-                style: TextStyle(
-                  color: AppColors.textMain,
-                  fontWeight: FontWeight.w800,
-                  fontSize: 18,
-                  letterSpacing: -0.3,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'This look will be permanently removed and cannot be recovered.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 13.5,
-                  height: 1.5,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => Navigator.pop(context, false),
-                      child: Container(
-                        height: 48,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.border, width: 1.2),
-                        ),
-                        child: Center(
-                          child: Text(
-                            'Cancel',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withValues(alpha: 0.10),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Colors.redAccent,
+                      size: 26,
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => Navigator.pop(context, true),
-                      child: Container(
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent,
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.redAccent.withOpacity(0.30),
-                              blurRadius: 14,
-                              offset: const Offset(0, 5),
+                  const SizedBox(height: 18),
+                  Text(
+                    'Delete Look?',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                      letterSpacing: -0.3,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'This look will be permanently removed and cannot be recovered.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13.5,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context, false),
+                          child: Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: AppColors.border,
+                                width: 1.2,
+                              ),
                             ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Text(
-                            'Delete',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
+                            child: Center(
+                              child: Text(
+                                'Cancel',
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => Navigator.pop(context, true),
+                          child: Container(
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: Colors.redAccent,
+                              borderRadius: BorderRadius.circular(14),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.redAccent.withValues(
+                                    alpha: 0.30,
+                                  ),
+                                  blurRadius: 14,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: const Center(
+                              child: Text(
+                                'Delete',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
-    ) ??
+        ) ??
         false;
 
     if (!confirm) return;
+
+    // ── Optimistic remove from cache + UI ─────────────────────────────────
+    _cache.remove(lookId);
+    _favouriteIds.remove(lookId);
+    _heartControllers[lookId]?.dispose();
+    _heartControllers.remove(lookId);
+    if (mounted) setState(() {});
 
     try {
       await Supabase.instance.client
@@ -305,52 +444,46 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
           .from('saved_looks')
           .delete()
           .eq('id', lookId);
-      setState(() {
-        _savedLooks.removeWhere((look) => look['id'] == lookId);
-        _favouriteIds.remove(lookId);
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Look deleted.',
-              style: TextStyle(color: Colors.white),
-            ),
-            backgroundColor: AppColors.primary,
-            behavior: SnackBarBehavior.floating,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            margin: const EdgeInsets.all(16),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      if (mounted) _showInfoSnackBar('Look deleted.');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting look: $e')),
-      );
+      // Restore on failure — trigger a full refresh
+      if (mounted) {
+        await _refresh();
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error deleting look: $e')));
+      }
     }
   }
 
   // ── SHARE / OPEN ACTIONS ───────────────────────────────────────────────────
 
   Future<void> _shareImage(String imageUrl, String lookName) async {
+    File? tempFile;
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Preparing image…')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Preparing image…')));
+      }
       final response = await http.get(Uri.parse(imageUrl));
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/$lookName.jpg');
-      await file.writeAsBytes(response.bodyBytes);
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Check out my makeup look: $lookName!',
-      );
+      final safeName = lookName.replaceAll(RegExp(r'[^\w\-]'), '_');
+      tempFile = File('${dir.path}/$safeName.jpg');
+      await tempFile.writeAsBytes(response.bodyBytes);
+      await Share.shareXFiles([
+        XFile(tempFile.path),
+      ], text: 'Check out my makeup look: $lookName!');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to share image.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to share image.')));
+      }
+    } finally {
+      try {
+        await tempFile?.delete();
+      } catch (_) {}
     }
   }
 
@@ -359,35 +492,38 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not open the web link.')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open the web link.')),
+        );
+      }
     }
   }
 
   Future<void> _copyLink(String lookId) async {
     await Clipboard.setData(ClipboardData(text: '$_webBaseUrl$lookId'));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text(
-            'Link copied! 📋',
-            style: TextStyle(color: Colors.white),
-          ),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          margin: const EdgeInsets.all(16),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+    if (mounted) _showInfoSnackBar('Link copied! 📋');
   }
 
   Future<void> _shareLink(String lookId, String lookName) async {
     await Share.share(
-        'Check out my virtual makeup look "$lookName" here: $_webBaseUrl$lookId');
+      'Check out my virtual makeup look "$lookName" here: $_webBaseUrl$lookId',
+    );
+  }
+
+  // ── SNACKBAR HELPER ────────────────────────────────────────────────────────
+
+  void _showInfoSnackBar(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(color: Colors.white)),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+        duration: const Duration(seconds: 2),
+      ),
+    );
   }
 
   // ── BUILD ──────────────────────────────────────────────────────────────────
@@ -395,31 +531,30 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
   @override
   Widget build(BuildContext context) {
     final topPad = MediaQuery.of(context).padding.top;
+    final isLoading = !_cache.isLoaded;
 
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          // ── CUSTOM HEADER ────────────────────────────────────────────────
           _buildHeader(topPad),
-
-          // ── BODY ─────────────────────────────────────────────────────────
           Expanded(
-            child: _isLoading
-                ? const Center(
-                    child: CircularProgressIndicator(
-                      color: AppColors.primary,
-                      strokeWidth: 1.5,
+            child: isLoading
+                ? _buildSkeletonGrid() // shows skeleton instead of spinner
+                : _cache.looks.isEmpty
+                ? _buildEmptyState()
+                : RefreshIndicator(
+                    onRefresh: _refresh,
+                    color: AppColors.primary,
+                    backgroundColor: AppColors.surface,
+                    displacement: 20,
+                    child: FadeTransition(
+                      opacity: _fadeAnim,
+                      child: _visibleLooks.isEmpty
+                          ? _buildEmptyFavourites()
+                          : _buildGrid(),
                     ),
-                  )
-                : _savedLooks.isEmpty
-                    ? _buildEmptyState()
-                    : FadeTransition(
-                        opacity: _fadeAnim,
-                        child: _visibleLooks.isEmpty
-                            ? _buildEmptyFavourites()
-                            : _buildGrid(),
-                      ),
+                  ),
           ),
         ],
       ),
@@ -429,21 +564,21 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
   // ── HEADER ─────────────────────────────────────────────────────────────────
 
   Widget _buildHeader(double topPad) {
-    final favCount =
-        _savedLooks.where((l) => _favouriteIds.contains(l['id'])).length;
+    final favCount = _cache.looks
+        .where((l) => _favouriteIds.contains(l['id']))
+        .length;
+    final totalCount = _cache.looks.length;
+    final isLoading = !_cache.isLoaded;
 
     return Container(
       padding: EdgeInsets.fromLTRB(20, topPad + 14, 20, 0),
       decoration: BoxDecoration(
         color: AppColors.background,
-        border: Border(
-          bottom: BorderSide(color: AppColors.border, width: 1),
-        ),
+        border: Border(bottom: BorderSide(color: AppColors.border, width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Back + title
           Row(
             children: [
               GestureDetector(
@@ -465,36 +600,40 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
               ),
               const SizedBox(width: 14),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'My Looks',
-                      style: TextStyle(
-                        color: AppColors.textMain,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 22,
-                        letterSpacing: -0.6,
-                      ),
-                    ),
-                    if (!_isLoading)
-                      Text(
-                        '${_savedLooks.length} saved  ·  $favCount favourited',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                  ],
+                child: Text(
+                  'My Looks',
+                  style: TextStyle(
+                    color: AppColors.textMain,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 22,
+                    letterSpacing: -0.6,
+                  ),
                 ),
               ),
             ],
           ),
 
-          const SizedBox(height: 16),
+          if (!isLoading) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _buildStatChip(
+                  icon: Icons.collections_bookmark_rounded,
+                  label: '$totalCount Saved',
+                  accent: false,
+                ),
+                const SizedBox(width: 8),
+                _buildStatChip(
+                  icon: Icons.favorite_rounded,
+                  label: '$favCount Favourited',
+                  accent: favCount > 0,
+                ),
+              ],
+            ),
+          ],
 
-          // Tab bar
+          const SizedBox(height: 14),
+
           Row(
             children: [
               _buildTab(_LooksTab.all, 'All Looks', Icons.grid_view_rounded),
@@ -507,25 +646,60 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
               ),
             ],
           ),
-          const SizedBox(height: 0),
+          const SizedBox(height: 2),
         ],
       ),
     );
   }
 
-  Widget _buildTab(
-    _LooksTab tab,
-    String label,
-    IconData icon, {
-    int? badge,
+  Widget _buildStatChip({
+    required IconData icon,
+    required String label,
+    required bool accent,
   }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: accent
+            ? AppColors.primary.withValues(alpha: 0.10)
+            : AppColors.surface,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(
+          color: accent
+              ? AppColors.primary.withValues(alpha: 0.25)
+              : AppColors.border,
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 12,
+            color: accent ? AppColors.primary : AppColors.textMuted,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: accent ? AppColors.primary : AppColors.textMuted,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTab(_LooksTab tab, String label, IconData icon, {int? badge}) {
     final isSelected = _currentTab == tab;
     return GestureDetector(
       onTap: () => setState(() => _currentTab = tab),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
-        margin: const EdgeInsets.only(bottom: 0),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
           color: isSelected ? AppColors.primary : Colors.transparent,
@@ -537,10 +711,10 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: AppColors.primary.withOpacity(0.28),
+                    color: AppColors.primary.withValues(alpha: 0.28),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
-                  )
+                  ),
                 ]
               : null,
         ),
@@ -557,20 +731,18 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
               label,
               style: TextStyle(
                 color: isSelected ? Colors.white : AppColors.textMuted,
-                fontWeight:
-                    isSelected ? FontWeight.w700 : FontWeight.w500,
+                fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                 fontSize: 13,
               ),
             ),
             if (badge != null) ...[
               const SizedBox(width: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? Colors.white.withOpacity(0.25)
-                      : AppColors.primary.withOpacity(0.12),
+                      ? Colors.white.withValues(alpha: 0.25)
+                      : AppColors.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -589,12 +761,31 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
     );
   }
 
+  // ── SKELETON GRID (shown while cache loads) ────────────────────────────────
+
+  Widget _buildSkeletonGrid() {
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        crossAxisSpacing: 14,
+        mainAxisSpacing: 14,
+        childAspectRatio: 0.62,
+      ),
+      itemCount: 6, // show 6 skeleton cards
+      itemBuilder: (_, __) => _SkeletonCard(),
+    );
+  }
+
   // ── GRID ───────────────────────────────────────────────────────────────────
 
   Widget _buildGrid() {
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
-      physics: const BouncingScrollPhysics(),
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 2,
         crossAxisSpacing: 14,
@@ -606,10 +797,9 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
         final look = _visibleLooks[index];
         return _buildCard(
           lookId: look['id'] as String,
-          lookName: look['look_name'] ?? 'My Look',
+          lookName: look['look_name'] as String? ?? 'My Look',
           imageUrl: look['preview_image_url'] as String?,
           dateStr: look['created_at'] as String,
-          index: index,
         );
       },
     );
@@ -622,28 +812,30 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
     required String lookName,
     required String? imageUrl,
     required String dateStr,
-    required int index,
   }) {
     final isFav = _favouriteIds.contains(lookId);
+    final heartCtrl = _heartCtrl(lookId);
 
     return GestureDetector(
       onTap: () => _applySavedLook(lookId),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOut,
         decoration: BoxDecoration(
           color: AppColors.surface,
           borderRadius: BorderRadius.circular(22),
           border: Border.all(
             color: isFav
-                ? AppColors.primary.withOpacity(0.30)
+                ? AppColors.primary.withValues(alpha: 0.35)
                 : AppColors.border,
             width: isFav ? 1.5 : 1,
           ),
           boxShadow: [
             BoxShadow(
               color: isFav
-                  ? AppColors.primary.withOpacity(0.08)
-                  : Colors.black.withOpacity(0.04),
-              blurRadius: isFav ? 18 : 10,
+                  ? AppColors.primary.withValues(alpha: 0.10)
+                  : Colors.black.withValues(alpha: 0.05),
+              blurRadius: isFav ? 20 : 10,
               spreadRadius: isFav ? 2 : 0,
               offset: const Offset(0, 4),
             ),
@@ -660,113 +852,167 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
                   Positioned.fill(
                     child: ClipRRect(
                       borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(22)),
+                        top: Radius.circular(22),
+                      ),
                       child: imageUrl != null && imageUrl.isNotEmpty
-                          ? Image.network(
-                              imageUrl,
+                          ? CachedNetworkImage(
+                              imageUrl: imageUrl,
                               fit: BoxFit.cover,
-                              loadingBuilder:
-                                  (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  color: AppColors.background,
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      color: AppColors.primary,
-                                      strokeWidth: 1.5,
-                                      value: loadingProgress
-                                                  .expectedTotalBytes !=
-                                              null
-                                          ? loadingProgress
-                                                  .cumulativeBytesLoaded /
-                                              loadingProgress
-                                                  .expectedTotalBytes!
-                                          : null,
-                                    ),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (_, __, ___) =>
+                              // Pehli baar load hone pr shimmer dikhao
+                              placeholder: (context, url) => _buildShimmer(),
+                              // Disk cache se aaye toh instant — koi shimmer nahi
+                              fadeInDuration: Duration.zero,
+                              fadeOutDuration: Duration.zero,
+                              errorWidget: (context, url, error) =>
                                   _buildPlaceholder(),
                             )
-                          : _buildPlaceholder(),
+                          : _buildPendingUploadPlaceholder(),
                     ),
                   ),
 
-                  // Subtle top-right favourite button
+                  // Bottom gradient scrim
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 60,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.zero,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.45),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Favourite button
                   Positioned(
                     top: 10,
                     right: 10,
                     child: GestureDetector(
                       onTap: () => _toggleFavourite(lookId),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        width: 34,
-                        height: 34,
-                        decoration: BoxDecoration(
-                          color: isFav
-                              ? AppColors.primary
-                              : Colors.black.withOpacity(0.30),
-                          shape: BoxShape.circle,
-                          border: Border.all(
+                      child: ScaleTransition(
+                        scale: heartCtrl,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
                             color: isFav
                                 ? AppColors.primary
-                                : Colors.white.withOpacity(0.15),
-                            width: 1,
+                                : Colors.black.withValues(alpha: 0.30),
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: isFav
+                                  ? AppColors.primary
+                                  : Colors.white.withValues(alpha: 0.20),
+                              width: 1,
+                            ),
+                            boxShadow: isFav
+                                ? [
+                                    BoxShadow(
+                                      color: AppColors.primary.withValues(
+                                        alpha: 0.40,
+                                      ),
+                                      blurRadius: 10,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ]
+                                : null,
                           ),
-                          boxShadow: isFav
-                              ? [
-                                  BoxShadow(
-                                    color:
-                                        AppColors.primary.withOpacity(0.4),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 3),
-                                  )
-                                ]
-                              : null,
-                        ),
-                        child: Center(
-                          child: Icon(
-                            isFav
-                                ? Icons.favorite_rounded
-                                : Icons.favorite_border_rounded,
-                            color: Colors.white,
-                            size: 16,
+                          child: Center(
+                            child: Icon(
+                              isFav
+                                  ? Icons.favorite_rounded
+                                  : Icons.favorite_border_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
 
-                  // "Apply" label on bottom of image — subtle pill
+                  // Date badge
                   Positioned(
-                    bottom: 10,
+                    bottom: 9,
                     left: 10,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 5),
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.40),
+                        color: Colors.black.withValues(alpha: 0.38),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.12),
+                          color: Colors.white.withValues(alpha: 0.12),
                           width: 0.8,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
-                        children: const [
+                        children: [
+                          Icon(
+                            Icons.calendar_today_rounded,
+                            color: Colors.white.withValues(alpha: 0.80),
+                            size: 9,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _formatDate(dateStr),
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.90),
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // "Apply" pill
+                  Positioned(
+                    bottom: 9,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.38),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.12),
+                          width: 0.8,
+                        ),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
                           Icon(
                             Icons.auto_fix_high_rounded,
                             color: Colors.white,
-                            size: 11,
+                            size: 9,
                           ),
                           SizedBox(width: 4),
                           Text(
-                            'Tap to apply',
+                            'Apply',
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: 10,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.w600,
                               letterSpacing: 0.2,
                             ),
@@ -781,10 +1027,20 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
 
             // ── Info row ─────────────────────────────────────────────────
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 11, 8, 12),
+              padding: const EdgeInsets.fromLTRB(12, 10, 8, 11),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  if (isFav)
+                    Container(
+                      width: 3,
+                      height: 32,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -795,32 +1051,32 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
-                            fontSize: 14,
+                            fontSize: 13.5,
                             color: AppColors.textMain,
                             letterSpacing: -0.2,
                           ),
                         ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            if (isFav) ...[
+                        if (isFav) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
                               Icon(
                                 Icons.favorite_rounded,
                                 color: AppColors.primary,
                                 size: 9,
                               ),
                               const SizedBox(width: 4),
-                            ],
-                            Text(
-                              _formatDate(dateStr),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: AppColors.textMuted,
-                                fontWeight: FontWeight.w500,
+                              Text(
+                                'Favourited',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -841,7 +1097,7 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
                       ),
                       color: AppColors.surface,
                       elevation: 6,
-                      shadowColor: Colors.black.withOpacity(0.12),
+                      shadowColor: Colors.black.withValues(alpha: 0.12),
                       onSelected: (value) {
                         switch (value) {
                           case 0:
@@ -865,24 +1121,47 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
                           isFav
                               ? Icons.favorite_rounded
                               : Icons.favorite_border_rounded,
-                          isFav
-                              ? 'Remove Favourite'
-                              : 'Add to Favourites',
+                          isFav ? 'Remove Favourite' : 'Add to Favourites',
                           true,
                           isFav ? AppColors.primary : AppColors.textMain,
                         ),
                         const PopupMenuDivider(height: 1),
-                        _menuItem(1, Icons.image_outlined, 'Share Image',
-                            imageUrl != null, AppColors.textMain),
-                        _menuItem(2, Icons.open_in_browser_rounded,
-                            'Open in Web', true, AppColors.textMain),
-                        _menuItem(3, Icons.copy_rounded, 'Copy Link', true,
-                            AppColors.textMain),
-                        _menuItem(4, Icons.share_outlined, 'Share Link',
-                            true, AppColors.textMain),
+                        _menuItem(
+                          1,
+                          Icons.image_outlined,
+                          'Share Image',
+                          imageUrl != null,
+                          AppColors.textMain,
+                        ),
+                        _menuItem(
+                          2,
+                          Icons.open_in_browser_rounded,
+                          'Open in Web',
+                          true,
+                          AppColors.textMain,
+                        ),
+                        _menuItem(
+                          3,
+                          Icons.copy_rounded,
+                          'Copy Link',
+                          true,
+                          AppColors.textMain,
+                        ),
+                        _menuItem(
+                          4,
+                          Icons.share_outlined,
+                          'Share Link',
+                          true,
+                          AppColors.textMain,
+                        ),
                         const PopupMenuDivider(height: 1),
-                        _menuItem(5, Icons.delete_outline_rounded,
-                            'Delete Look', true, Colors.redAccent),
+                        _menuItem(
+                          5,
+                          Icons.delete_outline_rounded,
+                          'Delete Look',
+                          true,
+                          Colors.redAccent,
+                        ),
                       ],
                     ),
                   ),
@@ -902,22 +1181,21 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
     bool enabled,
     Color color,
   ) {
+    final effectiveColor = enabled
+        ? color
+        : AppColors.textMuted.withValues(alpha: 0.4);
     return PopupMenuItem<int>(
       value: value,
       enabled: enabled,
       height: 42,
       child: Row(
         children: [
-          Icon(
-            icon,
-            color: enabled ? color : AppColors.textMuted.withOpacity(0.4),
-            size: 18,
-          ),
+          Icon(icon, color: effectiveColor, size: 18),
           const SizedBox(width: 12),
           Text(
             label,
             style: TextStyle(
-              color: enabled ? color : AppColors.textMuted.withOpacity(0.4),
+              color: effectiveColor,
               fontSize: 13.5,
               fontWeight: FontWeight.w500,
             ),
@@ -931,104 +1209,261 @@ class _SavedLooksScreenState extends State<SavedLooksScreen>
 
   Widget _buildEmptyState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
-              shape: BoxShape.circle,
-              border:
-                  Border.all(color: AppColors.primary.withOpacity(0.15), width: 1.5),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 92,
+              height: 92,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.18),
+                  width: 1.5,
+                ),
+              ),
+              child: Icon(
+                Icons.face_retouching_natural_rounded,
+                size: 40,
+                color: AppColors.primary,
+              ),
             ),
-            child: Icon(
-              Icons.face_retouching_natural_rounded,
-              size: 40,
-              color: AppColors.primary,
+            const SizedBox(height: 24),
+            Text(
+              'No Looks Saved Yet',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                color: AppColors.textMain,
+                letterSpacing: -0.4,
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            'No Looks Saved Yet',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textMain,
-              letterSpacing: -0.4,
+            const SizedBox(height: 10),
+            Text(
+              'Try on some makeup and save your favourite combinations here!',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14.5,
+                color: AppColors.textMuted,
+                height: 1.65,
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Try on some makeup and save your\nfavorite combinations here!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14.5,
-              color: AppColors.textMuted,
-              height: 1.6,
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildEmptyFavourites() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            width: 88,
-            height: 88,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
-              shape: BoxShape.circle,
-              border:
-                  Border.all(color: AppColors.primary.withOpacity(0.15), width: 1.5),
-            ),
-            child: Icon(
-              Icons.favorite_border_rounded,
-              size: 38,
-              color: AppColors.primary,
+    return SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      child: SizedBox(
+        height: 400,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 92,
+                  height: 92,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: AppColors.primary.withValues(alpha: 0.18),
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Icon(
+                    Icons.favorite_border_rounded,
+                    size: 38,
+                    color: AppColors.primary,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'No Favourites Yet',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.textMain,
+                    letterSpacing: -0.4,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'Tap the ♡ on any look to add it to your favourites.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14.5,
+                    color: AppColors.textMuted,
+                    height: 1.65,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 24),
-          Text(
-            'No Favourites Yet',
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w800,
-              color: AppColors.textMain,
-              letterSpacing: -0.4,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            'Tap the ♡ on any look to\nadd it to your favourites.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 14.5,
-              color: AppColors.textMuted,
-              height: 1.6,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
   Widget _buildPlaceholder() {
     return Container(
-      color: AppColors.primary.withOpacity(0.06),
+      color: AppColors.primary.withValues(alpha: 0.06),
       child: Center(
         child: Icon(
           Icons.face_retouching_natural_rounded,
-          color: AppColors.primary.withOpacity(0.5),
+          color: AppColors.primary.withValues(alpha: 0.45),
           size: 36,
         ),
       ),
+    );
+  }
+
+  // ── Shown when look was just saved and image upload is still in progress ───
+  Widget _buildPendingUploadPlaceholder() {
+    return Container(
+      color: AppColors.primary.withValues(alpha: 0.06),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: CircularProgressIndicator(
+                color: AppColors.primary.withValues(alpha: 0.5),
+                strokeWidth: 1.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Processing…',
+              style: TextStyle(
+                color: AppColors.primary.withValues(alpha: 0.6),
+                fontSize: 10,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Proper shimmer animation shown while network image decodes
+  Widget _buildShimmer() {
+    return _ShimmerBox(
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+    );
+  }
+}
+
+// ── SKELETON CARD ─────────────────────────────────────────────────────────────
+
+class _SkeletonCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(22),
+              ),
+              child: _ShimmerBox(),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _ShimmerBox(
+                  width: 100,
+                  height: 12,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                const SizedBox(height: 6),
+                _ShimmerBox(
+                  width: 60,
+                  height: 10,
+                  borderRadius: BorderRadius.circular(5),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── SHIMMER BOX ───────────────────────────────────────────────────────────────
+
+class _ShimmerBox extends StatefulWidget {
+  final double? width;
+  final double? height;
+  final BorderRadius? borderRadius;
+
+  const _ShimmerBox({this.width, this.height, this.borderRadius});
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1100),
+    )..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, __) {
+        return Container(
+          width: widget.width,
+          height: widget.height,
+          decoration: BoxDecoration(
+            borderRadius: widget.borderRadius,
+            color: Color.lerp(
+              AppColors.primary.withValues(alpha: 0.05),
+              AppColors.primary.withValues(alpha: 0.13),
+              _anim.value,
+            ),
+          ),
+        );
+      },
     );
   }
 }

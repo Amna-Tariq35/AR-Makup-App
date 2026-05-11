@@ -11,7 +11,8 @@ class WelcomeScreen extends StatefulWidget {
   State<WelcomeScreen> createState() => _WelcomeScreenState();
 }
 
-class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProviderStateMixin {
+class _WelcomeScreenState extends State<WelcomeScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeIn;
   late Animation<Offset> _slideUp;
@@ -60,6 +61,7 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
       extendBodyBehindAppBar: true,
       body: Stack(
         children: [
+          // Hero image
           Positioned.fill(
             child: Image.asset(
               'assets/images/hero_model.png',
@@ -67,6 +69,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
               alignment: Alignment.topCenter,
             ),
           ),
+
+          // Vertical fade-to-background gradient
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -76,14 +80,16 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                   stops: const [0.0, 0.38, 0.62, 1.0],
                   colors: [
                     Colors.transparent,
-                    AppColors.background.withOpacity(0.10),
-                    AppColors.background.withOpacity(0.72),
+                    AppColors.background.withValues(alpha: 0.10),
+                    AppColors.background.withValues(alpha: 0.72),
                     AppColors.background,
                   ],
                 ),
               ),
             ),
           ),
+
+          // Side vignette
           Positioned.fill(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -91,18 +97,22 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                   begin: Alignment.centerLeft,
                   end: Alignment.centerRight,
                   colors: [
-                    AppColors.background.withOpacity(0.18),
+                    AppColors.background.withValues(alpha: 0.18),
                     Colors.transparent,
                   ],
                 ),
               ),
             ),
           ),
+
+          // Sparkle accent
           Positioned(
             top: size.height * 0.07,
             right: 28,
-            child: _SparkleIcon(),
+            child: const _SparkleIcon(),
           ),
+
+          // Bottom content
           Positioned(
             left: 0,
             right: 0,
@@ -122,19 +132,25 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // Badge pill
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.12),
+                          color: AppColors.primary.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(50),
                           border: Border.all(
-                            color: AppColors.primary.withOpacity(0.35),
+                            color: AppColors.primary.withValues(alpha: 0.35),
                           ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.auto_awesome_rounded, size: 13, color: AppColors.primary),
+                            Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 13,
+                              color: AppColors.primary,
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               'AI-Powered AR Makeup',
@@ -148,7 +164,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                           ],
                         ),
                       ),
+
                       const SizedBox(height: 18),
+
+                      // Headline
                       Text(
                         'Discover Your\nPerfect Look',
                         style: TextStyle(
@@ -159,7 +178,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                           letterSpacing: -0.5,
                         ),
                       ),
+
                       const SizedBox(height: 14),
+
+                      // Subtext
                       Text(
                         'Try on thousands of shades in real-time AR —\nfind what truly suits your beautiful skin.',
                         style: TextStyle(
@@ -169,7 +191,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                           letterSpacing: 0.1,
                         ),
                       ),
+
                       const SizedBox(height: 36),
+
+                      // Primary CTA
                       _PrimaryButton(
                         label: 'Get Started',
                         icon: Icons.arrow_forward_rounded,
@@ -180,23 +205,31 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
                           );
                         },
                       ),
+
                       const SizedBox(height: 14),
+
+                      // Secondary CTA
                       _SecondaryButton(
                         label: 'Sign In',
                         onPressed: () {
                           Navigator.push(
                             context,
-                            _fadeRoute(const AuthScreen(isLoginMode: true)),
+                            _fadeRoute(
+                                const AuthScreen(isLoginMode: true)),
                           );
                         },
                       ),
+
                       const SizedBox(height: 20),
+
+                      // Legal note
                       Center(
                         child: Text(
                           'By continuing you agree to our Terms & Privacy Policy',
                           style: TextStyle(
                             fontSize: 11.5,
-                            color: AppColors.textMuted.withOpacity(0.6),
+                            color: AppColors.textMuted
+                                .withValues(alpha: 0.6),
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -214,17 +247,24 @@ class _WelcomeScreenState extends State<WelcomeScreen> with SingleTickerProvider
 
   PageRoute _fadeRoute(Widget page) => PageRouteBuilder(
         pageBuilder: (_, __, ___) => page,
-        transitionsBuilder: (_, anim, __, child) => FadeTransition(opacity: anim, child: child),
+        transitionsBuilder: (_, anim, __, child) =>
+            FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 400),
       );
 }
+
+// ── Primary Button ─────────────────────────────────────────────────────────
 
 class _PrimaryButton extends StatefulWidget {
   final String label;
   final IconData icon;
   final VoidCallback onPressed;
 
-  const _PrimaryButton({required this.label, required this.icon, required this.onPressed});
+  const _PrimaryButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+  });
 
   @override
   State<_PrimaryButton> createState() => _PrimaryButtonState();
@@ -249,17 +289,22 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
           width: double.infinity,
           height: 58,
           decoration: BoxDecoration(
+            // Fixed gradient — avoids fragile color channel arithmetic
             gradient: LinearGradient(
               colors: [
                 AppColors.primary,
-                AppColors.primary.withRed((AppColors.primary.red + 30).clamp(0, 255)),
+                const Color(0xFFD4748E),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(18),
             boxShadow: [
-              BoxShadow(color: AppColors.primary.withOpacity(0.45), blurRadius: 22, offset: const Offset(0, 8)),
+              BoxShadow(
+                color: AppColors.primary.withValues(alpha: 0.42),
+                blurRadius: 22,
+                offset: const Offset(0, 8),
+              ),
             ],
           ),
           child: Row(
@@ -267,13 +312,21 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
             children: [
               Text(
                 widget.label,
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Colors.white, letterSpacing: 0.3),
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: 0.3,
+                ),
               ),
               const SizedBox(width: 10),
               Container(
                 width: 32,
                 height: 32,
-                decoration: BoxDecoration(color: Colors.white.withOpacity(0.22), borderRadius: BorderRadius.circular(10)),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.22),
+                  borderRadius: BorderRadius.circular(10),
+                ),
                 child: Icon(widget.icon, color: Colors.white, size: 18),
               ),
             ],
@@ -284,11 +337,16 @@ class _PrimaryButtonState extends State<_PrimaryButton> {
   }
 }
 
+// ── Secondary Button ──────────────────────────────────────────────────────
+
 class _SecondaryButton extends StatefulWidget {
   final String label;
   final VoidCallback onPressed;
 
-  const _SecondaryButton({required this.label, required this.onPressed});
+  const _SecondaryButton({
+    required this.label,
+    required this.onPressed,
+  });
 
   @override
   State<_SecondaryButton> createState() => _SecondaryButtonState();
@@ -315,15 +373,27 @@ class _SecondaryButtonState extends State<_SecondaryButton> {
           decoration: BoxDecoration(
             color: AppColors.surface,
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: AppColors.border.withOpacity(0.6), width: 1.4),
+            border: Border.all(
+              color: AppColors.border.withValues(alpha: 0.6),
+              width: 1.4,
+            ),
             boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 12, offset: const Offset(0, 4)),
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.04),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
             ],
           ),
           child: Center(
             child: Text(
               widget.label,
-              style: TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: AppColors.primary, letterSpacing: 0.3),
+              style: TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+                letterSpacing: 0.3,
+              ),
             ),
           ),
         ),
@@ -332,20 +402,30 @@ class _SecondaryButtonState extends State<_SecondaryButton> {
   }
 }
 
+// ── Sparkle Icon ──────────────────────────────────────────────────────────
+
 class _SparkleIcon extends StatefulWidget {
+  const _SparkleIcon();
+
   @override
   State<_SparkleIcon> createState() => _SparkleIconState();
 }
 
-class _SparkleIconState extends State<_SparkleIcon> with SingleTickerProviderStateMixin {
+class _SparkleIconState extends State<_SparkleIcon>
+    with SingleTickerProviderStateMixin {
   late AnimationController _c;
   late Animation<double> _pulse;
 
   @override
   void initState() {
     super.initState();
-    _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 2200))..repeat(reverse: true);
-    _pulse = Tween<double>(begin: 0.7, end: 1.0).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut));
+    _c = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2200),
+    )..repeat(reverse: true);
+    _pulse = Tween<double>(begin: 0.7, end: 1.0).animate(
+      CurvedAnimation(parent: _c, curve: Curves.easeInOut),
+    );
   }
 
   @override
@@ -360,10 +440,13 @@ class _SparkleIconState extends State<_SparkleIcon> with SingleTickerProviderSta
       opacity: _pulse,
       child: Icon(
         Icons.auto_awesome_rounded,
-        color: Colors.white.withOpacity(0.75),
+        color: Colors.white.withValues(alpha: 0.75),
         size: 22,
         shadows: [
-          Shadow(color: AppColors.primary.withOpacity(0.6), blurRadius: 12),
+          Shadow(
+            color: AppColors.primary.withValues(alpha: 0.6),
+            blurRadius: 12,
+          ),
         ],
       ),
     );

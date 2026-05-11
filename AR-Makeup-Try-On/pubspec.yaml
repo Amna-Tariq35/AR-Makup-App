@@ -48,6 +48,8 @@ dependencies:
   image_picker: ^1.2.1
   google_mlkit_face_detection: ^0.13.2
   shared_preferences: ^2.5.5
+  cached_network_image: ^3.4.1
+  flutter_native_splash: ^2.4.7
  
   # baaki dependencies...
 
@@ -112,3 +114,14 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+# ... (baaki file ke niche)
+
+# ... (baaki file ke bilkul niche)
+
+flutter_native_splash:
+  color: "#FFF0F5"
+  color_dark: "#1A0A0F"
+  android_12:
+    color: "#FFF0F5"
+    color_dark: "#1A0A0F"
+  fullscreen: true
